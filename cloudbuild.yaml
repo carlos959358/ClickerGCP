@@ -103,7 +103,3 @@ timeout: '3600s'
 substitutions:
   _REGION: 'europe-southwest1'
   _ARTIFACT_REPO: 'clicker-repo'
-
-# Only build on push to main branch
-onPush:
-  branch: '^main$'
