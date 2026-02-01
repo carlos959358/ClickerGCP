@@ -5,7 +5,7 @@ resource "google_firestore_database" "clicker" {
   type        = "FIRESTORE_NATIVE"
 
   # Allow deletion on terraform destroy
-  delete_protection_state = "DELETE_PROTECTION_ENABLED"
+  delete_protection_state = "DELETE_PROTECTION_DISABLED"
   deletion_policy         = "DELETE"
 }
 
