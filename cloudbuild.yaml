@@ -1,0 +1,109 @@
+# Google Cloud Build Configuration
+# Automatically builds Docker images and deploys on push to main branch
+
+steps:
+  # Step 1: Build backend Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-backend'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/backend:latest'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/backend:${COMMIT_SHA}'
+      - './backend'
+    waitFor: ['-']
+
+  # Step 2: Push backend image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-backend'
+    args:
+      - 'push'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/backend:latest'
+    waitFor: ['build-backend']
+
+  # Step 3: Build consumer Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-consumer'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/consumer:latest'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/consumer:${COMMIT_SHA}'
+      - './consumer'
+    waitFor: ['-']
+
+  # Step 4: Push consumer image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-consumer'
+    args:
+      - 'push'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/consumer:latest'
+    waitFor: ['build-consumer']
+
+  # Step 5: Initialize Terraform
+  - name: 'gcr.io/cloud-builders/terraform'
+    id: 'terraform-init'
+    args:
+      - 'init'
+    dir: 'terraform'
+    env:
+      - 'GOOGLE_APPLICATION_CREDENTIALS=/workspace/key.json'
+    waitFor: ['push-backend', 'push-consumer']
+
+  # Step 6: Validate Terraform
+  - name: 'gcr.io/cloud-builders/terraform'
+    id: 'terraform-validate'
+    args:
+      - 'validate'
+    dir: 'terraform'
+    waitFor: ['terraform-init']
+
+  # Step 7: Plan Terraform changes (for review)
+  - name: 'gcr.io/cloud-builders/terraform'
+    id: 'terraform-plan'
+    args:
+      - 'plan'
+      - '-input=false'
+      - '-var=gcp_project_id=${PROJECT_ID}'
+      - '-var=gcp_region=${_REGION}'
+      - '-var=backend_docker_image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/backend:latest'
+      - '-var=consumer_docker_image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/consumer:latest'
+    dir: 'terraform'
+    waitFor: ['terraform-validate']
+
+  # Step 8: Apply Terraform (deploy to GCP)
+  - name: 'gcr.io/cloud-builders/terraform'
+    id: 'terraform-apply'
+    args:
+      - 'apply'
+      - '-auto-approve'
+      - '-input=false'
+      - '-var=gcp_project_id=${PROJECT_ID}'
+      - '-var=gcp_region=${_REGION}'
+      - '-var=backend_docker_image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/backend:latest'
+      - '-var=consumer_docker_image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/consumer:latest'
+    dir: 'terraform'
+    waitFor: ['terraform-plan']
+
+# Images to push to Artifact Registry
+images:
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/backend:latest'
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/consumer:latest'
+
+# Build configuration
+options:
+  machineType: 'N1_HIGHCPU_8'
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: '3600s'
+
+# Substitution variables
+substitutions:
+  _REGION: 'europe-southwest1'
+  _ARTIFACT_REPO: 'clicker-repo'
+
+# Only build on push to main branch
+onPush:
+  branch: '^main$'

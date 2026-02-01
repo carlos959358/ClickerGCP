@@ -1,0 +1,38 @@
+# Terraform Variables Example
+# Copy this file to terraform.tfvars and fill in your actual values
+# DO NOT commit terraform.tfvars to version control - it contains sensitive data
+
+# Your GCP Project ID
+gcp_project_id = "your-gcp-project-id"
+
+# GCP Region (default: europe-southwest1)
+gcp_region = "europe-southwest1"
+
+# Cloud Run service names
+backend_service_name  = "clicker-backend"
+consumer_service_name = "clicker-consumer"
+
+# Pub/Sub configuration
+pubsub_topic_name        = "click-events"
+pubsub_subscription_name = "click-consumer-sub"
+
+# Firestore database
+firestore_database_id = "clicker-db"
+
+# Instance scaling
+backend_min_instances  = 1
+backend_max_instances  = 10
+consumer_min_instances = 1
+consumer_max_instances = 5
+
+# Resource allocation
+backend_memory  = "256Mi"
+consumer_memory = "256Mi"
+
+# Request timeout
+request_timeout = 60
+
+# GitHub Configuration for Cloud Build CI/CD
+# When you push to main branch, Cloud Build automatically builds and deploys
+github_owner = "your-github-username"  # Replace with your GitHub username
+github_repo  = "ClickerGCP"            # Your repository name

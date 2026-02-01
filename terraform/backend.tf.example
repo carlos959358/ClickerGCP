@@ -1,0 +1,15 @@
+# Terraform Backend Configuration
+# This file configures remote state storage in Google Cloud Storage
+# Copy this file to backend.tf and update the bucket name with your own
+
+terraform {
+  backend "gcs" {
+    # Replace with your GCS bucket name
+    # Format: {gcp-project-id}-terraform-state
+    bucket = "your-gcp-project-id-terraform-state"
+
+    # Prefix for state files within the bucket
+    # This allows multiple projects to share one bucket
+    prefix = "clicker"
+  }
+}
