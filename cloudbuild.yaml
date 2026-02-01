@@ -1,5 +1,5 @@
 # Google Cloud Build Configuration
-# Builds Docker images and pushes to Artifact Registry
+# Builds Docker images, pushes to Artifact Registry, and deploys with Terraform
 
 steps:
   # Step 1: Build backend Docker image
@@ -39,6 +39,61 @@ steps:
       - 'push'
       - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/consumer:latest'
     waitFor: ['build-consumer']
+
+  # Step 5: Terraform Init
+  - name: 'hashicorp/terraform:1.0'
+    id: 'terraform-init'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        cd terraform
+        terraform init
+    waitFor: ['push-backend', 'push-consumer']
+
+  # Step 6: Terraform Validate
+  - name: 'hashicorp/terraform:1.0'
+    id: 'terraform-validate'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        cd terraform
+        terraform validate
+    waitFor: ['terraform-init']
+
+  # Step 7: Terraform Plan
+  - name: 'hashicorp/terraform:1.0'
+    id: 'terraform-plan'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        cd terraform
+        terraform plan \
+          -input=false \
+          -var=gcp_project_id=${PROJECT_ID} \
+          -var=gcp_region=${_REGION} \
+          -var=backend_docker_image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/backend:latest \
+          -var=consumer_docker_image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/consumer:latest
+    waitFor: ['terraform-validate']
+
+  # Step 8: Terraform Apply
+  - name: 'hashicorp/terraform:1.0'
+    id: 'terraform-apply'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        cd terraform
+        terraform apply \
+          -input=false \
+          -auto-approve \
+          -var=gcp_project_id=${PROJECT_ID} \
+          -var=gcp_region=${_REGION} \
+          -var=backend_docker_image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/backend:latest \
+          -var=consumer_docker_image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/consumer:latest
+    waitFor: ['terraform-plan']
 
 # Images to push to Artifact Registry
 images:
