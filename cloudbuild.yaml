@@ -41,11 +41,9 @@ steps:
     waitFor: ['build-consumer']
 
   # Step 5: Deploy backend to Cloud Run
-  - name: 'gcr.io/cloud-builders/gke-deploy'
+  - name: 'gcr.io/cloud-builders/gcloud'
     id: 'deploy-backend'
     args:
-      - 'run'
-      - 'gcloud'
       - 'run'
       - 'deploy'
       - '${_BACKEND_SERVICE}'
@@ -55,11 +53,9 @@ steps:
     waitFor: ['push-backend']
 
   # Step 6: Deploy consumer to Cloud Run
-  - name: 'gcr.io/cloud-builders/gke-deploy'
+  - name: 'gcr.io/cloud-builders/gcloud'
     id: 'deploy-consumer'
     args:
-      - 'run'
-      - 'gcloud'
       - 'run'
       - 'deploy'
       - '${_CONSUMER_SERVICE}'
