@@ -1,5 +1,5 @@
 # Google Cloud Build Configuration
-# Builds Docker images, pushes to Artifact Registry, and deploys with Terraform
+# Builds Docker images, pushes to Artifact Registry, and updates Cloud Run services
 
 steps:
   # Step 1: Build backend Docker image
@@ -40,62 +40,34 @@ steps:
       - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/consumer:latest'
     waitFor: ['build-consumer']
 
-  # Step 5: Terraform Init
-  - name: 'hashicorp/terraform:1.0'
-    id: 'terraform-init'
-    entrypoint: 'sh'
+  # Step 5: Deploy backend to Cloud Run
+  - name: 'gcr.io/cloud-builders/gke-deploy'
+    id: 'deploy-backend'
     args:
-      - '-c'
-      - |
-        cd terraform
-        terraform init
-    waitFor: ['push-backend', 'push-consumer']
+      - 'run'
+      - 'gcloud'
+      - 'run'
+      - 'deploy'
+      - '${_BACKEND_SERVICE}'
+      - '--image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/backend:latest'
+      - '--region=${_REGION}'
+      - '--allow-unauthenticated'
+    waitFor: ['push-backend']
 
-  # Step 6: Terraform Validate
-  - name: 'hashicorp/terraform:1.0'
-    id: 'terraform-validate'
-    entrypoint: 'sh'
+  # Step 6: Deploy consumer to Cloud Run
+  - name: 'gcr.io/cloud-builders/gke-deploy'
+    id: 'deploy-consumer'
     args:
-      - '-c'
-      - |
-        cd terraform
-        terraform validate
-    waitFor: ['terraform-init']
+      - 'run'
+      - 'gcloud'
+      - 'run'
+      - 'deploy'
+      - '${_CONSUMER_SERVICE}'
+      - '--image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/consumer:latest'
+      - '--region=${_REGION}'
+    waitFor: ['push-consumer']
 
-  # Step 7: Terraform Plan
-  - name: 'hashicorp/terraform:1.0'
-    id: 'terraform-plan'
-    entrypoint: 'sh'
-    args:
-      - '-c'
-      - |
-        cd terraform
-        terraform plan \
-          -input=false \
-          -var=gcp_project_id=${PROJECT_ID} \
-          -var=gcp_region=${_REGION} \
-          -var=backend_docker_image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/backend:latest \
-          -var=consumer_docker_image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/consumer:latest
-    waitFor: ['terraform-validate']
-
-  # Step 8: Terraform Apply
-  - name: 'hashicorp/terraform:1.0'
-    id: 'terraform-apply'
-    entrypoint: 'sh'
-    args:
-      - '-c'
-      - |
-        cd terraform
-        terraform apply \
-          -input=false \
-          -auto-approve \
-          -var=gcp_project_id=${PROJECT_ID} \
-          -var=gcp_region=${_REGION} \
-          -var=backend_docker_image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/backend:latest \
-          -var=consumer_docker_image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/consumer:latest
-    waitFor: ['terraform-plan']
-
-# Images to push to Artifact Registry
+# Images pushed to Artifact Registry
 images:
   - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/backend:latest'
   - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/consumer:latest'
@@ -111,3 +83,5 @@ timeout: '1800s'
 substitutions:
   _REGION: 'europe-southwest1'
   _ARTIFACT_REPO: 'clicker-repo'
+  _BACKEND_SERVICE: 'clicker-backend'
+  _CONSUMER_SERVICE: 'clicker-consumer'
