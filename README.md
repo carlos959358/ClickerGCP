@@ -114,6 +114,7 @@ Cloud Build will automatically:
 - Push to Artifact Registry
 - Update Cloud Run services
 
+
 Monitor the build:
 ```bash
 gcloud builds log --stream
