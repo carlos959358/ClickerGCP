@@ -55,3 +55,8 @@ resource "google_cloud_run_service_iam_member" "consumer_pubsub" {
 
   depends_on = [google_cloud_run_service.consumer]
 }
+
+# Get project number for Pub/Sub service account
+data "google_project" "current" {
+  project_id = var.gcp_project_id
+}

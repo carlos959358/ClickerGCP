@@ -3,6 +3,10 @@ resource "google_firestore_database" "clicker" {
   name        = var.firestore_database_id
   location_id = var.gcp_region
   type        = "FIRESTORE_NATIVE"
+
+  # Allow deletion on terraform destroy
+  delete_protection_state = "DELETE_PROTECTION_ENABLED"
+  deletion_policy         = "DELETE"
 }
 
 # Note: Global counter document is created via init-firestore.sh script

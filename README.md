@@ -64,6 +64,7 @@ A distributed, real-time global counter game built on **Google Cloud Platform** 
 - Terraform 1.0+ ([install](https://www.terraform.io/downloads))
 - Docker ([install](https://docs.docker.com/get-docker/))
 - Git
+- GitHub repository access (for Cloud Build integration)
 
 ### 1. Clone & Configure
 
@@ -72,43 +73,210 @@ A distributed, real-time global counter game built on **Google Cloud Platform** 
 git clone https://github.com/carlos959358/ClickerGCP.git
 cd ClickerGCP
 
-# Create configuration from template
-cp terraform.tfvars.example terraform.tfvars
-
-# Edit with your GCP project ID
-nano terraform.tfvars
+# Create Terraform configuration
+mkdir -p terraform
+cat > terraform/terraform.tfvars <<EOF
+gcp_project_id = "your-gcp-project-id"
+gcp_region     = "europe-southwest1"
+github_owner   = "your-github-username"
+github_repo    = "ClickerGCP"
+EOF
 ```
 
-Update `terraform.tfvars`:
-```hcl
-gcp_project_id = "your-actual-gcp-project-id"
-gcp_region     = "us-central1"  # or your preferred region
-```
-
-### 2. Deploy to GCP
+### 2. Initialize Infrastructure (Firestore, Pub/Sub, Cloud Run)
 
 ```bash
-# This will build, push, and deploy everything
-./scripts/deploy.sh
+cd terraform
+terraform init
+terraform plan
+terraform apply
 ```
 
-The script will:
-- ✅ Enable required GCP APIs
-- ✅ Create Artifact Registry repository
-- ✅ Build and push Docker images
-- ✅ Deploy Cloud Run services
-- ✅ Set up Firestore database
-- ✅ Output your service URLs
+This sets up:
+- ✅ Firestore database
+- ✅ Pub/Sub topic & subscription
+- ✅ Artifact Registry repository
+- ✅ Cloud Run services (backend & consumer)
+- ✅ Service accounts & IAM roles
 
-### 3. Access Your App
+**Note:** Cloud Run services will be in a pending state until Docker images are built and pushed.
 
-Once deployment completes, open the backend URL in your browser:
+### 3. Build & Push Docker Images
 
+**Option A: Via Cloud Build (automatic on push)**
+
+```bash
+git push origin main
 ```
-https://clicker-backend-XXXXXXX.a.run.app
+
+Cloud Build will automatically:
+- Build both Docker images
+- Push to Artifact Registry
+- Update Cloud Run services
+
+Monitor the build:
+```bash
+gcloud builds log --stream
 ```
 
-Start clicking! 🖱️
+**Option B: Manual Docker build**
+
+```bash
+# Authenticate with Artifact Registry
+gcloud auth configure-docker europe-southwest1-docker.pkg.dev
+
+# Get your project ID
+PROJECT_ID=$(gcloud config get-value project)
+
+# Build and push backend
+docker build -t europe-southwest1-docker.pkg.dev/$PROJECT_ID/clicker-repo/backend:latest ./backend
+docker push europe-southwest1-docker.pkg.dev/$PROJECT_ID/clicker-repo/backend:latest
+
+# Build and push consumer
+docker build -t europe-southwest1-docker.pkg.dev/$PROJECT_ID/clicker-repo/consumer:latest ./consumer
+docker push europe-southwest1-docker.pkg.dev/$PROJECT_ID/clicker-repo/consumer:latest
+```
+
+### 4. Access Your App
+
+Once images are deployed, your services are live:
+
+```bash
+# Get backend URL
+gcloud run services describe clicker-backend --region=europe-southwest1 --format='value(status.url)'
+
+# Get consumer URL
+gcloud run services describe clicker-consumer --region=europe-southwest1 --format='value(status.url)'
+```
+
+Or from Terraform outputs:
+```bash
+cd terraform
+terraform output backend_url
+terraform output consumer_url
+```
+
+Open the backend URL in your browser and start clicking! 🖱️
+
+## 🔄 Cloud Build CI/CD Pipeline
+
+Cloud Build is now connected to your GitHub repository! When you push to the `main` branch, Cloud Build automatically builds and deploys your application.
+
+### Setting Up Your Build Trigger
+
+If you haven't created the trigger yet:
+
+1. Go to [Cloud Build Triggers](https://console.cloud.google.com/cloud-build/triggers)
+2. Click **Create Trigger**
+3. Fill in:
+   - **Name:** `clicker-main-trigger`
+   - **Event:** Push to a branch
+   - **Repository:** Select `ClickerGCP`
+   - **Branch:** `^main$`
+   - **Build configuration:** Cloud Build configuration file
+   - **Location:** `/cloudbuild.yaml`
+4. Click **Create**
+
+Your trigger is now active and will run on every push to `main`!
+
+### How It Works
+
+When you push to `main`, Cloud Build automatically:
+
+1. **Builds Docker images** - Backend and consumer services
+2. **Pushes to Registry** - Images go to Artifact Registry
+3. **Runs Terraform** - Applies infrastructure changes
+4. **Deploys Services** - Updates Cloud Run services
+
+### Cloud Build Configuration
+
+**Root `cloudbuild.yaml`:**
+```yaml
+steps:
+  1. Build backend Docker image
+  2. Push backend to Artifact Registry
+  3. Build consumer Docker image
+  4. Push consumer to Artifact Registry
+  5. Initialize Terraform
+  6. Validate Terraform
+  7. Plan Terraform changes
+  8. Apply Terraform (deploy)
+```
+
+### Testing Your Setup
+
+#### Option 1: Push to Main
+
+```bash
+# Make a change
+echo "# Test" >> README.md
+
+# Push to main
+git add README.md
+git commit -m "Trigger Cloud Build"
+git push origin main
+```
+
+View the build in Cloud Build Console or via CLI:
+
+```bash
+gcloud builds list --limit=5
+gcloud builds log BUILD_ID --stream
+```
+
+#### Option 2: Manual Build
+
+```bash
+# Manually trigger a build
+gcloud builds submit --config=cloudbuild.yaml
+
+# Watch it
+gcloud builds log --stream
+```
+
+### Monitoring Builds
+
+**View build history:**
+```bash
+gcloud builds list --limit=10
+```
+
+**Watch a specific build:**
+```bash
+gcloud builds log BUILD_ID --stream
+```
+
+**Open Cloud Build Console:**
+```bash
+# Open in browser
+gcloud builds list --filter="status=QUEUED OR status=WORKING" --format="value(id)" | head -1 | xargs -I {} echo "https://console.cloud.google.com/cloud-build/builds/{PROJECT_ID}"
+```
+
+Or visit: https://console.cloud.google.com/cloud-build/builds
+
+### Troubleshooting
+
+**Build not triggering on push:**
+1. Go to [Cloud Build Triggers](https://console.cloud.google.com/cloud-build/triggers)
+2. Verify trigger is enabled
+3. Check branch pattern is `^main$`
+4. Ensure you're pushing to `main` branch
+
+**Build failures:**
+- Click the failed build in Cloud Build Console
+- View full logs under "Build Details"
+- Common issues:
+  - Missing Firestore database - run `terraform apply` first
+  - Missing images - check if previous builds succeeded
+  - Permission errors - check Cloud Build service account has required IAM roles
+
+**Images not pushing:**
+- Verify Artifact Registry repository exists:
+  ```bash
+  gcloud artifacts repositories list
+  ```
+- Check Cloud Build service account has `artifactregistry.writer` role
+- View build logs for specific error messages
 
 ## 📁 Project Structure
 
