@@ -54,6 +54,7 @@ A fully functional, production-ready click counter application built on Google C
 
 ## Message Flow
 
+
 ```
 1. User clicks the frontend
    └─> Frontend sends HTTP GET /click?country=XX&ip=A.B.C.D
