@@ -27,3 +27,18 @@ output "consumer_service_account" {
   description = "Consumer service account email"
   value       = google_service_account.consumer.email
 }
+
+output "artifact_registry_repository" {
+  description = "Artifact Registry repository"
+  value       = "${var.gcp_region}-docker.pkg.dev/${var.gcp_project_id}/${data.google_artifact_registry_repository.clicker.repository_id}"
+}
+
+output "backend_docker_image" {
+  description = "Backend Docker image URL"
+  value       = var.backend_docker_image
+}
+
+output "consumer_docker_image" {
+  description = "Consumer Docker image URL"
+  value       = var.consumer_docker_image
+}

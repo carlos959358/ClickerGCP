@@ -56,6 +56,7 @@ resource "google_cloud_run_service" "backend" {
     google_service_account.backend,
     google_project_iam_member.backend_pubsub_publisher,
     google_project_iam_member.backend_firestore_editor,
+    null_resource.build_backend,
   ]
 }
 
@@ -122,6 +123,7 @@ resource "google_cloud_run_service" "consumer" {
     google_service_account.consumer,
     google_project_iam_member.consumer_pubsub_subscriber,
     google_project_iam_member.consumer_firestore_editor,
+    null_resource.build_consumer,
   ]
 }
 
