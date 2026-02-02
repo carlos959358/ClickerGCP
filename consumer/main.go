@@ -16,6 +16,15 @@ var (
 	notifier *BackendNotifier
 )
 
+// Helper to get map keys for debugging
+func mapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 func initializeServices(ctx context.Context, projectID, backendURL string) {
 	log.Println("[Services] Initializing Firestore...")
 	var err error
@@ -83,85 +92,96 @@ func main() {
 			return
 		}
 
+		log.Printf("[/process] ===== START =====")
+
 		// Accept any JSON structure
 		var payload map[string]interface{}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			log.Printf("JSON decode error: %v", err)
-			w.WriteHeader(http.StatusOK) // Accept anyway
+			log.Printf("[/process] ERROR: JSON decode failed: %v", err)
+			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"status":"ok"}`))
 			return
 		}
+		log.Printf("[/process] ✓ Raw payload decoded: %v", payload)
 
 		// Extract message
 		msgInterface, ok := payload["message"]
 		if !ok {
-			log.Printf("No message field in payload")
+			log.Printf("[/process] ERROR: No 'message' field in payload. Keys: %v", mapKeys(payload))
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"status":"ok"}`))
 			return
 		}
+		log.Printf("[/process] ✓ Message field found: %v", msgInterface)
 
 		msgMap, ok := msgInterface.(map[string]interface{})
 		if !ok {
-			log.Printf("Message is not a map")
+			log.Printf("[/process] ERROR: Message is not a map, type: %T", msgInterface)
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"status":"ok"}`))
 			return
 		}
+		log.Printf("[/process] ✓ Message is map with keys: %v", mapKeys(msgMap))
 
 		// Extract data field
 		dataStr, ok := msgMap["data"].(string)
 		if !ok {
-			log.Printf("No data field or not string")
+			log.Printf("[/process] ERROR: No 'data' field or not string, type: %T, keys: %v", msgMap["data"], mapKeys(msgMap))
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"status":"ok"}`))
 			return
 		}
+		log.Printf("[/process] ✓ Data field found, length: %d bytes", len(dataStr))
 
 		// Decode base64 data
 		decoded, err := base64.StdEncoding.DecodeString(dataStr)
 		if err != nil {
-			log.Printf("Base64 decode failed: %v", err)
+			log.Printf("[/process] ERROR: Base64 decode failed: %v", err)
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"status":"ok"}`))
 			return
 		}
+		log.Printf("[/process] ✓ Base64 decoded, result: %s", string(decoded))
 
 		// Parse click event
 		var event ClickEvent
 		if err := json.Unmarshal(decoded, &event); err != nil {
-			log.Printf("Event unmarshal failed: %v", err)
+			log.Printf("[/process] ERROR: Event unmarshal failed: %v", err)
+			log.Printf("[/process] ERROR: Trying to unmarshal: %s", string(decoded))
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"status":"ok"}`))
 			return
 		}
-
-		log.Printf("Processing click from %s", event.Country)
+		log.Printf("[/process] ✓ Event parsed: Country=%s, IP=%s, Timestamp=%v", event.Country, event.IP, event.Timestamp)
 
 		// Update Firestore
 		if updater == nil {
-			log.Printf("Updater not initialized")
+			log.Printf("[/process] ERROR: Updater not initialized")
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"status":"ok"}`))
 			return
 		}
+		log.Printf("[/process] ✓ Updater initialized")
 
 		if err := updater.IncrementCounters(context.Background(), event.Country, event.Country); err != nil {
-			log.Printf("Failed to increment: %v", err)
+			log.Printf("[/process] ERROR: Failed to increment counters: %v", err)
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"status":"ok"}`))
 			return
 		}
+		log.Printf("[/process] ✓ Counters incremented for country: %s", event.Country)
 
-		// Notify backend
+		// Get updated counters
 		counters, err := updater.GetCounters(context.Background())
 		if err != nil {
-			log.Printf("Failed to get counters: %v", err)
+			log.Printf("[/process] ERROR: Failed to get counters: %v", err)
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"status":"ok"}`))
 			return
 		}
+		log.Printf("[/process] ✓ Counters retrieved: %v", counters)
 
+		// Notify backend
 		if notifier != nil {
 			global := int64(0)
 			if val, ok := counters["global"].(int64); ok {
@@ -172,12 +192,17 @@ func main() {
 				countries = val
 			}
 
+			log.Printf("[/process] Notifying backend: global=%d, countries=%d", global, len(countries))
 			if err := notifier.NotifyCounterUpdate(global, countries); err != nil {
-				log.Printf("Notify failed: %v", err)
+				log.Printf("[/process] ERROR: Notify failed: %v", err)
+			} else {
+				log.Printf("[/process] ✓ Backend notified successfully")
 			}
+		} else {
+			log.Printf("[/process] WARNING: Notifier not initialized, skipping backend notification")
 		}
 
-		// Always return 200 OK
+		log.Printf("[/process] ===== SUCCESS =====")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ok"}`))
 	})
