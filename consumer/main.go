@@ -167,19 +167,4 @@ func main() {
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Printf("Server error: %v", err)
 	}
-	})
-
-	// Start HTTP server for health checks
-	server := &http.Server{
-		Addr:         ":" + port,
-		Handler:      http.DefaultServeMux,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  90 * time.Second,
-	}
-
-	log.Printf("Starting HTTP server on :%s", port)
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Printf("Server error: %v", err)
-	}
 }
