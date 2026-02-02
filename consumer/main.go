@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"cloud.google.com/go/firestore"
 )
 
 var (
@@ -23,6 +25,45 @@ func mapKeys(m map[string]interface{}) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// Save failed message to dead letter queue in Firestore
+func saveFailedMessage(messageID string, payload map[string]interface{}, errorMsg string) error {
+	if updater == nil {
+		return fmt.Errorf("updater not initialized")
+	}
+
+	// Save to Firestore failed_messages collection
+	ctx := context.Background()
+	failedMsg := map[string]interface{}{
+		"messageId":   messageID,
+		"payload":     payload,
+		"error":       errorMsg,
+		"timestamp":   time.Now().UTC(),
+		"failedCount": 1,
+	}
+
+	// Try to increment failure count if message already exists
+	doc := updater.client.Collection("failed_messages").Doc(messageID)
+	err := updater.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		snap, err := tx.Get(doc)
+		if err == nil && snap.Exists() {
+			// Message already exists, increment count
+			failedCount := int64(1)
+			if val, ok := snap.Data()["failedCount"].(int64); ok {
+				failedCount = val + 1
+			}
+			return tx.Set(doc, map[string]interface{}{
+				"failedCount": failedCount,
+				"lastError":   errorMsg,
+				"lastAttempt": time.Now().UTC(),
+			}, firestore.MergeAll)
+		}
+		// New message, create it
+		return tx.Set(doc, failedMsg)
+	})
+
+	return err
 }
 
 func initializeServices(ctx context.Context, projectID, backendURL string) {
