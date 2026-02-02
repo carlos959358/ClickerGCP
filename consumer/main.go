@@ -82,6 +82,10 @@ func main() {
 			return
 		}
 
+		// Log the incoming request for debugging
+		log.Printf("[/process] Received request, Content-Type: %s, Content-Length: %s",
+			r.Header.Get("Content-Type"), r.Header.Get("Content-Length"))
+
 		var pubsubMessage struct {
 			Message struct {
 				Data string `json:"data"`
@@ -91,11 +95,14 @@ func main() {
 		}
 
 		if err := json.NewDecoder(r.Body).Decode(&pubsubMessage); err != nil {
-			log.Printf("Failed to decode Pub/Sub message: %v", err)
+			log.Printf("[/process] ✗ Failed to decode Pub/Sub message: %v", err)
 			w.WriteHeader(http.StatusBadRequest)
 			fmt.Fprintf(w, `{"error":"decode failed: %v"}`, err)
 			return
 		}
+
+		log.Printf("[/process] ✓ Decoded message ID: %s, Data length: %d",
+			pubsubMessage.Message.ID, len(pubsubMessage.Message.Data))
 
 		// Process the message
 		var event ClickEvent
