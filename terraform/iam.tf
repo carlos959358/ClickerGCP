@@ -65,6 +65,15 @@ resource "google_cloud_run_service_iam_member" "consumer_pubsub" {
   depends_on = [google_cloud_run_service.consumer]
 }
 
+# Allow Pub/Sub service account to impersonate consumer service account (for OIDC token)
+resource "google_service_account_iam_member" "pubsub_consumer_user" {
+  service_account_id = google_service_account.consumer.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
+
+  depends_on = [google_service_account.consumer]
+}
+
 # Get project number for Pub/Sub service account
 data "google_project" "current" {
   project_id = var.gcp_project_id
