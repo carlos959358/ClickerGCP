@@ -28,10 +28,19 @@ resource "google_project_iam_member" "backend_firestore_editor" {
   depends_on = [google_service_account.backend]
 }
 
-# Consumer permissions
+# Consumer permissions - Pub/Sub subscriber
 resource "google_project_iam_member" "consumer_pubsub_subscriber" {
   project = var.gcp_project_id
   role    = "roles/pubsub.subscriber"
+  member  = "serviceAccount:${google_service_account.consumer.email}"
+
+  depends_on = [google_service_account.consumer]
+}
+
+# Consumer permissions - Pub/Sub viewer (needed to check subscription existence)
+resource "google_project_iam_member" "consumer_pubsub_viewer" {
+  project = var.gcp_project_id
+  role    = "roles/pubsub.viewer"
   member  = "serviceAccount:${google_service_account.consumer.email}"
 
   depends_on = [google_service_account.consumer]

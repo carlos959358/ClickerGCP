@@ -9,64 +9,26 @@ import (
 	"net/http"
 	"os"
 	"time"
-
-	"cloud.google.com/go/pubsub"
 )
 
 var (
-	subscriber      *PubSubSubscriber
-	subscriberReady = false
-	updater         *FirestoreUpdater
-	notifier        *BackendNotifier
+	updater  *FirestoreUpdater
+	notifier *BackendNotifier
 )
 
-func initializeSubscriber(ctx context.Context, projectID, subscriptionName, backendURL string) {
-	log.Println("[Subscriber] Starting background initialization...")
-
-	log.Println("[Subscriber] Initializing Firestore...")
+func initializeServices(ctx context.Context, projectID, backendURL string) {
+	log.Println("[Services] Initializing Firestore...")
 	var err error
 	updater, err = NewFirestoreUpdater(ctx, projectID)
 	if err != nil {
-		log.Printf("[Subscriber] ✗ Firestore initialization failed: %v", err)
+		log.Printf("[Services] ✗ Firestore initialization failed: %v", err)
 		return
 	}
-	log.Println("[Subscriber] ✓ Firestore ready")
+	log.Println("[Services] ✓ Firestore ready")
 
-	log.Println("[Subscriber] Initializing backend notifier...")
+	log.Println("[Services] Initializing backend notifier...")
 	notifier = NewBackendNotifier(backendURL)
-	log.Println("[Subscriber] ✓ Backend notifier ready")
-
-	log.Println("[Subscriber] Creating Pub/Sub client...")
-	pubsubClient, err := pubsub.NewClient(ctx, projectID)
-	if err != nil {
-		log.Printf("[Subscriber] ✗ Pub/Sub client creation failed: %v", err)
-		return
-	}
-	defer pubsubClient.Close()
-	log.Println("[Subscriber] ✓ Pub/Sub client ready")
-
-	log.Printf("[Subscriber] Checking subscription: %s\n", subscriptionName)
-	sub := pubsubClient.Subscription(subscriptionName)
-	exists, err := sub.Exists(ctx)
-	if err != nil {
-		log.Printf("[Subscriber] ✗ Failed to check subscription: %v", err)
-		return
-	}
-	if !exists {
-		log.Printf("[Subscriber] ✗ Subscription %s does not exist", subscriptionName)
-		return
-	}
-	log.Println("[Subscriber] ✓ Subscription verified")
-
-	subscriber = NewPubSubSubscriber(sub, updater, notifier)
-	subscriberReady = true
-
-	// Start processing messages
-	log.Println("[Subscriber] Starting message processing (max 10 concurrent)...")
-	if err := subscriber.Start(ctx, 10); err != nil {
-		log.Printf("[Subscriber] ✗ Subscriber error: %v", err)
-		subscriberReady = false
-	}
+	log.Println("[Services] ✓ Backend notifier ready")
 }
 
 func main() {
@@ -74,11 +36,6 @@ func main() {
 	projectID := os.Getenv("GCP_PROJECT_ID")
 	if projectID == "" {
 		log.Fatal("GCP_PROJECT_ID environment variable not set")
-	}
-
-	subscriptionName := os.Getenv("PUBSUB_SUBSCRIPTION")
-	if subscriptionName == "" {
-		subscriptionName = "click-consumer-sub"
 	}
 
 	backendURL := os.Getenv("BACKEND_URL")
@@ -92,25 +49,23 @@ func main() {
 	}
 
 	log.Printf("Consumer service starting on port %s", port)
-	log.Printf("Project: %s, Subscription: %s, Backend: %s", projectID, subscriptionName, backendURL)
+	log.Printf("Project: %s, Backend: %s", projectID, backendURL)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Start subscriber initialization in background
-	go initializeSubscriber(ctx, projectID, subscriptionName, backendURL)
+	// Initialize services (Firestore and backend notifier)
+	go initializeServices(ctx, projectID, backendURL)
 
 	// Health check endpoint
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		if subscriberReady && subscriber != nil {
-			msgs, errs := subscriber.GetStats()
-			fmt.Fprintf(w, `{"status":"ready","messages_processed":%d,"errors":%d,"timestamp":%d}`,
-				msgs, errs, time.Now().UTC().Unix())
-		} else {
-			fmt.Fprintf(w, `{"status":"initializing","timestamp":%d}`, time.Now().UTC().Unix())
+		status := "ready"
+		if updater == nil || notifier == nil {
+			status = "initializing"
 		}
+		fmt.Fprintf(w, `{"status":"%s","timestamp":%d}`, status, time.Now().UTC().Unix())
 	})
 
 	// Liveness probe endpoint
