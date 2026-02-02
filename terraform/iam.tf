@@ -65,6 +65,17 @@ resource "google_cloud_run_service_iam_member" "consumer_pubsub" {
   depends_on = [google_cloud_run_service.consumer]
 }
 
+# Allow unauthenticated access to consumer service (for Pub/Sub push)
+resource "google_cloud_run_service_iam_member" "consumer_public" {
+  project  = var.gcp_project_id
+  service  = google_cloud_run_service.consumer.name
+  location = var.gcp_region
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+
+  depends_on = [google_cloud_run_service.consumer]
+}
+
 # Get project number for Pub/Sub service account
 data "google_project" "current" {
   project_id = var.gcp_project_id

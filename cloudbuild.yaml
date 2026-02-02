@@ -79,6 +79,7 @@ steps:
         gcloud run deploy ${_CONSUMER_SERVICE} \
           --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/consumer:latest \
           --region=${_REGION} \
+          --allow-unauthenticated \
           --update-env-vars=GCP_PROJECT_ID=${PROJECT_ID},PUBSUB_SUBSCRIPTION=click-consumer-sub,FIRESTORE_DATABASE=\(default\),BACKEND_URL=$$BACKEND_URL
     waitFor: ['capture-backend-url']
 
