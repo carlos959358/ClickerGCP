@@ -17,6 +17,12 @@ resource "google_pubsub_subscription" "click_consumer" {
 
     oidc_token {
       service_account_email = google_service_account.consumer.email
+      audience              = google_cloud_run_service.consumer.status[0].url
     }
   }
+
+  depends_on = [
+    google_pubsub_topic.click_events,
+    google_cloud_run_service.consumer
+  ]
 }

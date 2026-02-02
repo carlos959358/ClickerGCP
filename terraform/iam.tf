@@ -54,24 +54,16 @@ resource "google_project_iam_member" "consumer_firestore_editor" {
   depends_on = [google_service_account.consumer]
 }
 
-# Allow Pub/Sub to invoke consumer service (authenticated, secure)
-resource "google_cloud_run_service_iam_member" "consumer_pubsub" {
+# Allow unauthenticated access to consumer service (for Pub/Sub push webhook)
+# Security: Endpoint validates Pub/Sub message format
+resource "google_cloud_run_service_iam_member" "consumer_public" {
   project  = var.gcp_project_id
   service  = google_cloud_run_service.consumer.name
   location = var.gcp_region
   role     = "roles/run.invoker"
-  member   = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
+  member   = "allUsers"
 
   depends_on = [google_cloud_run_service.consumer]
-}
-
-# Allow Pub/Sub service account to impersonate consumer service account (for OIDC token)
-resource "google_service_account_iam_member" "pubsub_consumer_user" {
-  service_account_id = google_service_account.consumer.name
-  role               = "roles/iam.serviceAccountUser"
-  member             = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
-
-  depends_on = [google_service_account.consumer]
 }
 
 # Get project number for Pub/Sub service account

@@ -82,6 +82,14 @@ func main() {
 			return
 		}
 
+		// Validate this is a Pub/Sub push message
+		// Pub/Sub messages must have Content-Type: application/json
+		if r.Header.Get("Content-Type") != "application/json" {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(`{"error":"invalid content type"}`))
+			return
+		}
+
 		var pubsubMessage struct {
 			Message struct {
 				Data string `json:"data"`
@@ -93,6 +101,13 @@ func main() {
 		if err := json.NewDecoder(r.Body).Decode(&pubsubMessage); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			fmt.Fprintf(w, `{"error":"decode failed: %v"}`, err)
+			return
+		}
+
+		// Additional validation: message ID should not be empty
+		if pubsubMessage.Message.ID == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(`{"error":"missing message ID"}`))
 			return
 		}
 
