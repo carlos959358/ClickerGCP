@@ -152,7 +152,7 @@ func main() {
 			w.Write([]byte(`{"status":"ok"}`))
 			return
 		}
-		log.Printf("[/process] ✓ Event parsed: Country=%s, IP=%s, Timestamp=%v", event.Country, event.IP, event.Timestamp)
+		log.Printf("[/process] ✓ Event parsed: Country=%s, IP=%s, Timestamp=%d", event.Country, event.IP, event.Timestamp)
 
 		// Update Firestore
 		if updater == nil {

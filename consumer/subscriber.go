@@ -12,9 +12,9 @@ import (
 )
 
 type ClickEvent struct {
-	Timestamp time.Time `json:"timestamp"`
-	Country   string    `json:"country"`
-	IP        string    `json:"ip"`
+	Timestamp int64  `json:"timestamp"` // Unix timestamp in seconds
+	Country   string `json:"country"`
+	IP        string `json:"ip"`
 }
 
 type PubSubSubscriber struct {
