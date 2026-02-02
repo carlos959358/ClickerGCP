@@ -82,31 +82,27 @@ func main() {
 			return
 		}
 
-		// Log the incoming request for debugging
-		log.Printf("[/process] Received request, Content-Type: %s, Content-Length: %s",
-			r.Header.Get("Content-Type"), r.Header.Get("Content-Length"))
-
-		var pubsubMessage struct {
+		// Decode Pub/Sub envelope
+		var envelope struct {
 			Message struct {
-				Data string `json:"data"`
-				ID   string `json:"id"`
+				Data string      `json:"data"`
+				ID   string      `json:"messageId"`
+				Attrs map[string]string `json:"attributes"`
 			} `json:"message"`
 			Subscription string `json:"subscription"`
 		}
 
-		if err := json.NewDecoder(r.Body).Decode(&pubsubMessage); err != nil {
-			log.Printf("[/process] ✗ Failed to decode Pub/Sub message: %v", err)
+		if err := json.NewDecoder(r.Body).Decode(&envelope); err != nil {
+			log.Printf("[/process] Failed to decode envelope: %v", err)
 			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, `{"error":"decode failed: %v"}`, err)
 			return
 		}
 
-		log.Printf("[/process] ✓ Decoded message ID: %s, Data length: %d",
-			pubsubMessage.Message.ID, len(pubsubMessage.Message.Data))
+		log.Printf("[/process] Received message ID: %s", envelope.Message.ID)
 
 		// Process the message
 		var event ClickEvent
-		data, err := base64.StdEncoding.DecodeString(pubsubMessage.Message.Data)
+		data, err := base64.StdEncoding.DecodeString(envelope.Message.Data)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			fmt.Fprintf(w, `{"error":"base64 failed: %v"}`, err)
