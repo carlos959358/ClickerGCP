@@ -76,63 +76,61 @@ func main() {
 
 	// Pub/Sub push endpoint
 	http.HandleFunc("/process", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
-			w.Write([]byte(`{"error":"method not allowed"}`))
 			return
 		}
 
-		// Decode Pub/Sub envelope
-		var envelope struct {
+		// Parse Pub/Sub message
+		var pubsubMessage struct {
 			Message struct {
-				Data string      `json:"data"`
-				ID   string      `json:"messageId"`
-				Attrs map[string]string `json:"attributes"`
+				Data string `json:"data"`
+				ID   string `json:"messageId"`
 			} `json:"message"`
-			Subscription string `json:"subscription"`
 		}
 
-		if err := json.NewDecoder(r.Body).Decode(&envelope); err != nil {
-			log.Printf("[/process] Failed to decode envelope: %v", err)
+		if err := json.NewDecoder(r.Body).Decode(&pubsubMessage); err != nil {
+			log.Printf("Failed to decode message: %v", err)
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 
-		log.Printf("[/process] Received message ID: %s", envelope.Message.ID)
-
-		// Process the message
-		var event ClickEvent
-		data, err := base64.StdEncoding.DecodeString(envelope.Message.Data)
+		// Decode base64 data
+		decoded, err := base64.StdEncoding.DecodeString(pubsubMessage.Message.Data)
 		if err != nil {
+			log.Printf("Base64 decode failed: %v", err)
 			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, `{"error":"base64 failed: %v"}`, err)
 			return
 		}
 
-		if err := json.Unmarshal(data, &event); err != nil {
+		// Parse click event
+		var event ClickEvent
+		if err := json.Unmarshal(decoded, &event); err != nil {
+			log.Printf("Event unmarshal failed: %v", err)
 			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, `{"error":"unmarshal failed: %v"}`, err)
 			return
 		}
 
 		// Update Firestore
 		if updater == nil {
+			log.Printf("Updater not initialized")
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(`{"error":"updater not initialized"}`))
 			return
 		}
 
 		if err := updater.IncrementCounters(context.Background(), event.Country, event.Country); err != nil {
+			log.Printf("Failed to increment: %v", err)
 			w.WriteHeader(http.StatusInternalServerError)
-			fmt.Fprintf(w, `{"error":"increment failed: %v"}`, err)
 			return
 		}
 
-		// Get updated counters and notify backend
+		// Notify backend
 		counters, err := updater.GetCounters(context.Background())
 		if err != nil {
+			log.Printf("Failed to get counters: %v", err)
 			w.WriteHeader(http.StatusInternalServerError)
-			fmt.Fprintf(w, `{"error":"get failed: %v"}`, err)
 			return
 		}
 
@@ -147,13 +145,28 @@ func main() {
 			}
 
 			if err := notifier.NotifyCounterUpdate(global, countries); err != nil {
-				log.Printf("Failed to notify backend: %v", err)
+				log.Printf("Notify failed: %v", err)
 			}
 		}
 
-		w.Header().Set("Content-Type", "application/json")
+		// Success
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
+		w.Write([]byte(`{"success":true}`))
+	})
+
+	// Start HTTP server
+	server := &http.Server{
+		Addr:         ":" + port,
+		Handler:      http.DefaultServeMux,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  90 * time.Second,
+	}
+
+	log.Printf("Starting HTTP server on :%s", port)
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Printf("Server error: %v", err)
+	}
 	})
 
 	// Start HTTP server for health checks
