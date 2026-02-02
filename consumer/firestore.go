@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type FirestoreUpdater struct {
@@ -61,33 +63,30 @@ func (f *FirestoreUpdater) GetCounters(ctx context.Context) (map[string]interfac
 	// Get global counter
 	globalDoc, err := f.client.Collection("counters").Doc("global").Get(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get global counter: %w", err)
-	}
-
-	globalCount := int64(0)
-	if val, ok := globalDoc.Data()["count"]; ok {
-		if c, ok := val.(int64); ok {
-			globalCount = c
+		// If document doesn't exist, that's OK - just return 0
+		if status.Code(err) == codes.NotFound {
+			result["global"] = int64(0)
+		} else {
+			return nil, fmt.Errorf("failed to get global counter: %w", err)
 		}
-	}
-
-	result["global"] = globalCount
-
-	// Get all country counters
-	countries := make(map[string]interface{})
-	iter := f.client.Collection("counters").Documents(ctx)
-	defer iter.Stop()
-
-	for {
-		doc, err := iter.Next()
-		if err != nil {
-			// Check if iterator is exhausted - this is normal and means we're done
-			if err.Error() == "no more items in iterator" || err.Error() == "iterator exhausted" {
-				break
+	} else {
+		globalCount := int64(0)
+		if val, ok := globalDoc.Data()["count"]; ok {
+			if c, ok := val.(int64); ok {
+				globalCount = c
 			}
-			return nil, fmt.Errorf("failed to iterate counters: %w", err)
 		}
+		result["global"] = globalCount
+	}
 
+	// Get all country counters using snapshot
+	countries := make(map[string]interface{})
+	docs, err := f.client.Collection("counters").Documents(ctx).GetAll()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get counters: %w", err)
+	}
+
+	for _, doc := range docs {
 		docID := doc.Ref.ID
 		if docID == "global" {
 			continue
@@ -116,7 +115,7 @@ func (f *FirestoreUpdater) CheckIdempotency(ctx context.Context, messageID strin
 	doc, err := f.client.Collection("processed_messages").Doc(messageID).Get(ctx)
 	if err != nil {
 		// If document doesn't exist, it hasn't been processed
-		if err.Error() == "document not found" {
+		if status.Code(err) == codes.NotFound {
 			return false, nil
 		}
 		return false, fmt.Errorf("failed to check idempotency: %w", err)
