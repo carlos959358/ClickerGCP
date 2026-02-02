@@ -207,7 +207,7 @@ func NewPubSubPublisher(ctx context.Context, projectID, topicName string) (*PubS
 // PublishClickEvent publishes a click event to Pub/Sub
 func (p *PubSubPublisher) PublishClickEvent(ctx context.Context, country, ip string) error {
 	event := map[string]interface{}{
-		"timestamp": time.Now().UTC(),
+		"timestamp": time.Now().UTC().Unix(),
 		"country":   country,
 		"ip":        ip,
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"cloud.google.com/go/firestore"
 )
@@ -108,6 +109,29 @@ func (f *FirestoreUpdater) GetCounters(ctx context.Context) (map[string]interfac
 
 	result["countries"] = countries
 	return result, nil
+}
+
+// CheckIdempotency checks if a message has already been processed
+func (f *FirestoreUpdater) CheckIdempotency(ctx context.Context, messageID string) (bool, error) {
+	doc, err := f.client.Collection("processed_messages").Doc(messageID).Get(ctx)
+	if err != nil {
+		// If document doesn't exist, it hasn't been processed
+		if err.Error() == "document not found" {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to check idempotency: %w", err)
+	}
+	return doc.Exists(), nil
+}
+
+// RecordProcessedMessage records that a message has been successfully processed
+func (f *FirestoreUpdater) RecordProcessedMessage(ctx context.Context, messageID string, country string) error {
+	_, err := f.client.Collection("processed_messages").Doc(messageID).Set(ctx, map[string]interface{}{
+		"messageId": messageID,
+		"country":   country,
+		"timestamp": time.Now().UTC(),
+	})
+	return err
 }
 
 func (f *FirestoreUpdater) Close() error {
