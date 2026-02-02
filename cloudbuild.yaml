@@ -50,18 +50,37 @@ steps:
       - '--image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/backend:latest'
       - '--region=${_REGION}'
       - '--allow-unauthenticated'
+      - '--update-env-vars'
+      - 'GCP_PROJECT_ID=${PROJECT_ID},PUBSUB_TOPIC=click-events,FIRESTORE_DATABASE=(default)'
     waitFor: ['push-backend']
+
+  # Step 5b: Get backend URL for consumer and save to workspace
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'capture-backend-url'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        BACKEND_URL=$(gcloud run services describe ${_BACKEND_SERVICE} \
+          --region=${_REGION} \
+          --format='value(status.url)')
+        echo "$$BACKEND_URL" > /workspace/backend_url.txt
+        echo "Backend service URL: $$BACKEND_URL"
+    waitFor: ['deploy-backend']
 
   # Step 6: Deploy consumer to Cloud Run
   - name: 'gcr.io/cloud-builders/gcloud'
     id: 'deploy-consumer'
+    entrypoint: 'bash'
     args:
-      - 'run'
-      - 'deploy'
-      - '${_CONSUMER_SERVICE}'
-      - '--image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/consumer:latest'
-      - '--region=${_REGION}'
-    waitFor: ['push-consumer']
+      - '-c'
+      - |
+        BACKEND_URL=$(cat /workspace/backend_url.txt)
+        gcloud run deploy ${_CONSUMER_SERVICE} \
+          --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/consumer:latest \
+          --region=${_REGION} \
+          --update-env-vars=GCP_PROJECT_ID=${PROJECT_ID},PUBSUB_SUBSCRIPTION=click-consumer-sub,FIRESTORE_DATABASE=\(default\),BACKEND_URL=$$BACKEND_URL
+    waitFor: ['capture-backend-url']
 
 # Images pushed to Artifact Registry
 images:
