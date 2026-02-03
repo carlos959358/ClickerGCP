@@ -348,6 +348,38 @@ Repeat step 7b but for the consumer:
 
 ---
 
+### Manual Deploy (Alternative)
+
+If you prefer to manually build and push Docker images instead of using Terraform:
+
+```bash
+# 1. Set required environment variables
+export GCP_PROJECT_ID="your-gcp-project-id"
+export GCP_REGION="europe-southwest1"
+
+# Verify they're set
+echo "Project: $GCP_PROJECT_ID"
+echo "Region: $GCP_REGION"
+
+# 2. Build and push backend image
+docker build -t $GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/clicker-repo/backend:latest backend/
+docker push $GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/clicker-repo/backend:latest
+
+# 3. Build and push consumer image
+docker build -t $GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/clicker-repo/consumer:latest consumer/
+docker push $GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/clicker-repo/consumer:latest
+```
+
+**Or use gcloud builds submit (recommended):**
+
+```bash
+# From the repository root
+gcloud builds submit --config=backend/cloudbuild.yaml backend/
+gcloud builds submit --config=consumer/cloudbuild.yaml consumer/
+```
+
+---
+
 ### Cleanup: Destroy Everything
 
 When you're done testing and want to delete all resources (stop incurring charges):
