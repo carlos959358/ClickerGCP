@@ -7,6 +7,14 @@ resource "google_firestore_database" "clicker" {
   # Allow deletion on terraform destroy
   delete_protection_state = "DELETE_PROTECTION_DISABLED"
   deletion_policy         = "DELETE"
+
+  # Wait for builds to complete before creating database
+  # This gives Firestore time to clean up recently deleted database IDs
+  depends_on = [
+    null_resource.build_backend,
+    null_resource.build_consumer,
+    google_project_service.firestore
+  ]
 }
 
 # Note: Global counter document is created via init-firestore.sh script
