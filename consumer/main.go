@@ -109,17 +109,22 @@ func main() {
 
 	// Health check endpoint
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("[/health] Health check requested")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		status := "ready"
 		if updater == nil || notifier == nil {
 			status = "initializing"
+			log.Printf("[/health] Status: initializing (updater=%v, notifier=%v)", updater != nil, notifier != nil)
+		} else {
+			log.Printf("[/health] Status: ready")
 		}
 		fmt.Fprintf(w, `{"status":"%s","timestamp":%d}`, status, time.Now().UTC().Unix())
 	})
 
 	// Liveness probe endpoint
 	http.HandleFunc("/live", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("[/live] Liveness probe requested")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("alive"))
 	})
@@ -315,8 +320,11 @@ func main() {
 		IdleTimeout:  90 * time.Second,
 	}
 
-	log.Printf("Starting HTTP server on :%s", port)
+	log.Printf("[Server] Starting HTTP server on :%s", port)
+	log.Printf("[Server] Ready to receive requests")
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Printf("Server error: %v", err)
+		log.Printf("[Server] ERROR: Server error: %v", err)
+		log.Fatalf("[Server] FATAL: Server stopped unexpectedly")
 	}
+	log.Printf("[Server] HTTP server shutdown")
 }
