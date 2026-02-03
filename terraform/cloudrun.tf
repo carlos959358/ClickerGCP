@@ -55,7 +55,7 @@ resource "google_cloud_run_service" "backend" {
     google_project_service.run,
     google_service_account.backend,
     google_project_iam_member.backend_pubsub_publisher,
-    google_project_iam_member.backend_firestore_editor,
+    google_project_iam_member.backend_firestore_reader,
     null_resource.build_backend,
   ]
 }
