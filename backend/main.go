@@ -177,7 +177,12 @@ type PubSubPublisher struct {
 // NewPubSubPublisher creates a new publisher
 func NewPubSubPublisher(ctx context.Context, projectID, topicName string) (*PubSubPublisher, error) {
 	log.Printf("[PubSubPublisher] Creating Pub/Sub client for project: %s", projectID)
-	client, err := pubsub.NewClient(ctx, projectID)
+
+	// Create a context with timeout for the initialization
+	initCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	client, err := pubsub.NewClient(initCtx, projectID)
 	if err != nil {
 		log.Printf("[PubSubPublisher] Failed to create client: %v", err)
 		return nil, err
@@ -186,13 +191,20 @@ func NewPubSubPublisher(ctx context.Context, projectID, topicName string) (*PubS
 
 	log.Printf("[PubSubPublisher] Checking if topic '%s' exists", topicName)
 	topic := client.Topic(topicName)
-	exists, err := topic.Exists(ctx)
+
+	// Use a separate context with timeout for the topic check
+	checkCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	exists, err := topic.Exists(checkCtx)
 	if err != nil {
 		log.Printf("[PubSubPublisher] Error checking topic existence: %v", err)
+		client.Close()
 		return nil, err
 	}
 	if !exists {
 		log.Printf("[PubSubPublisher] Topic '%s' does not exist", topicName)
+		client.Close()
 		return nil, fmt.Errorf("topic %s does not exist", topicName)
 	}
 	log.Printf("[PubSubPublisher] Topic '%s' exists", topicName)
