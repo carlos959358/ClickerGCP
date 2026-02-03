@@ -55,11 +55,72 @@ const elements = {
     leaderboard: document.getElementById('leaderboard'),
     connectionStatus: document.getElementById('connectionStatus'),
     connectedUsers: document.getElementById('connectedUsers'),
+    appContainer: document.getElementById('app-container'),
+    notFoundContainer: document.getElementById('page-not-found'),
+    errorPath: document.getElementById('error-path'),
+    homeBtn: document.getElementById('homeBtn'),
 };
+
+// Check if current path is valid (only root path is valid for this SPA)
+function isValidPath() {
+    const path = window.location.pathname;
+    // Only root path is valid
+    return path === '/' || path === '';
+}
+
+// Show 404 page for invalid paths
+function show404Page() {
+    const currentPath = window.location.pathname;
+    elements.appContainer.style.display = 'none';
+    elements.notFoundContainer.style.display = 'block';
+
+    // Display the attempted path
+    if (elements.errorPath) {
+        elements.errorPath.textContent = `Attempted path: ${currentPath || '/'}`;
+    }
+
+    console.log('404: Invalid path accessed:', currentPath);
+}
+
+// Show main app page
+function showMainApp() {
+    elements.appContainer.style.display = 'block';
+    elements.notFoundContainer.style.display = 'none';
+}
+
+// Handle home button click
+function handleHomeClick() {
+    window.history.pushState(null, '', '/');
+    showMainApp();
+    // Reload the app
+    location.href = '/';
+}
+
+// Handle browser back/forward navigation
+window.addEventListener('popstate', () => {
+    if (!isValidPath()) {
+        show404Page();
+    } else {
+        showMainApp();
+    }
+});
 
 // Initialize application
 document.addEventListener('DOMContentLoaded', () => {
     console.log('Initializing Clicker app...');
+
+    // Check if the current path is valid
+    if (!isValidPath()) {
+        show404Page();
+
+        // Setup home button listener
+        if (elements.homeBtn) {
+            elements.homeBtn.addEventListener('click', handleHomeClick);
+        }
+        return;
+    }
+
+    showMainApp();
     setupEventListeners();
     connectWebSocket();
     // loadInitialCounts will be called after receiving auth token from WebSocket

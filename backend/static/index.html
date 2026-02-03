@@ -9,7 +9,8 @@
     <meta name="backend-url" content="BACKEND_URL_PLACEHOLDER">
 </head>
 <body>
-    <div class="container">
+    <!-- Main App Container -->
+    <div id="app-container" class="container">
         <header>
             <h1>Global Clicker Game</h1>
             <p class="subtitle">Click to contribute to the global counter!</p>
@@ -36,6 +37,30 @@
         <footer>
             <p>Connection Status: <span id="connectionStatus">Connecting...</span></p>
             <p>Connected Users: <span id="connectedUsers">0</span></p>
+        </footer>
+    </div>
+
+    <!-- 404 Page Container (Hidden by default) -->
+    <div id="page-not-found" class="container 404-container" style="display: none;">
+        <header class="error-header">
+            <h1>404</h1>
+            <p class="subtitle">Page Not Found</p>
+        </header>
+
+        <main class="error-main">
+            <section class="error-section">
+                <div class="error-content">
+                    <div class="error-emoji">🔍</div>
+                    <h2>Oops! This page doesn't exist</h2>
+                    <p>The page you're looking for could not be found.</p>
+                    <p class="error-path" id="error-path"></p>
+                    <button id="homeBtn" class="click-button home-button">← Back to Home</button>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>Need help? Try going <a href="/">back to the main page</a></p>
         </footer>
     </div>
 
