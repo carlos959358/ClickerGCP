@@ -62,7 +62,19 @@ resource "google_project_iam_member" "consumer_firestore_editor" {
   depends_on = [google_service_account.consumer]
 }
 
-# Allow Pub/Sub service to invoke consumer service (required for push delivery)
+# Allow unauthenticated access to consumer service for Pub/Sub push delivery
+# Note: The /process endpoint validates Pub/Sub message format for security
+resource "google_cloud_run_service_iam_member" "consumer_public" {
+  project  = var.gcp_project_id
+  service  = google_cloud_run_service.consumer.name
+  location = var.gcp_region
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+
+  depends_on = [google_cloud_run_service.consumer]
+}
+
+# Also allow Pub/Sub service account (for explicit OIDC token validation if needed)
 resource "google_cloud_run_service_iam_member" "consumer_pubsub_invoker" {
   project  = var.gcp_project_id
   service  = google_cloud_run_service.consumer.name
