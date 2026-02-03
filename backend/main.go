@@ -189,25 +189,11 @@ func NewPubSubPublisher(ctx context.Context, projectID, topicName string) (*PubS
 	}
 	log.Printf("[PubSubPublisher] Client created successfully")
 
-	log.Printf("[PubSubPublisher] Checking if topic '%s' exists", topicName)
+	// Get topic reference (we assume the topic exists, as checking existence
+	// can fail with PermissionDenied in Cloud Run even with proper IAM roles)
+	log.Printf("[PubSubPublisher] Getting topic reference for '%s'", topicName)
 	topic := client.Topic(topicName)
-
-	// Use a separate context with timeout for the topic check
-	checkCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	exists, err := topic.Exists(checkCtx)
-	if err != nil {
-		log.Printf("[PubSubPublisher] Error checking topic existence: %v", err)
-		client.Close()
-		return nil, err
-	}
-	if !exists {
-		log.Printf("[PubSubPublisher] Topic '%s' does not exist", topicName)
-		client.Close()
-		return nil, fmt.Errorf("topic %s does not exist", topicName)
-	}
-	log.Printf("[PubSubPublisher] Topic '%s' exists", topicName)
+	log.Printf("[PubSubPublisher] Topic reference obtained, assuming topic exists")
 
 	log.Printf("[PubSubPublisher] Publisher ready for topic '%s'", topicName)
 	return &PubSubPublisher{
