@@ -11,10 +11,18 @@ resource "google_service_account" "consumer" {
   display_name = "Clicker Consumer Service Account"
 }
 
-# Backend permissions
+# Backend permissions - Pub/Sub
 resource "google_project_iam_member" "backend_pubsub_publisher" {
   project = var.gcp_project_id
   role    = "roles/pubsub.publisher"
+  member  = "serviceAccount:${google_service_account.backend.email}"
+
+  depends_on = [google_service_account.backend]
+}
+
+resource "google_project_iam_member" "backend_pubsub_editor" {
+  project = var.gcp_project_id
+  role    = "roles/pubsub.editor"
   member  = "serviceAccount:${google_service_account.backend.email}"
 
   depends_on = [google_service_account.backend]
