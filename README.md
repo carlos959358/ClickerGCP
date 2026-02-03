@@ -139,63 +139,294 @@ ClickerGCP/
 
 ### Prerequisites
 
-- GCP Project with billing enabled
-- `gcloud` CLI installed and authenticated
-- `terraform` installed
+Before deploying, ensure you have:
 
-### Quick Deploy (Fully Automated)
+- **GCP Project** with billing enabled
+  - [Create a GCP project](https://console.cloud.google.com/projectcreate)
+  - [Enable billing](https://console.cloud.google.com/billing)
+
+- **gcloud CLI** installed and configured
+  ```bash
+  # Install gcloud: https://cloud.google.com/sdk/docs/install
+
+  # Verify installation
+  gcloud --version
+
+  # Login to GCP
+  gcloud auth login
+  ```
+
+- **Terraform** installed (version 1.0 or higher)
+  ```bash
+  # Install terraform: https://www.terraform.io/downloads
+
+  # Verify installation
+  terraform --version
+  ```
+
+- **Git** and the repository cloned
+  ```bash
+  git clone https://github.com/carlos959358/ClickerGCP.git
+  cd ClickerGCP
+  ```
+
+### Step-by-Step Deployment Guide
+
+#### Step 1: Configure GCP Project
 
 ```bash
-# 1. Authenticate with GCP
+# Set your GCP project ID (replace with your actual project ID)
+export GCP_PROJECT_ID="your-gcp-project-id"
+
+# Set the default project for gcloud
+gcloud config set project $GCP_PROJECT_ID
+
+# Authenticate with GCP (for Terraform)
 gcloud auth application-default login
-gcloud config set project YOUR_PROJECT_ID
-
-# 2. Deploy everything
-cd terraform
-terraform init
-terraform apply
-
-# 3. Wait for build completion (~5-10 minutes)
-# Terraform will:
-# ✅ Create Artifact Registry repository
-# ✅ Build and push backend Docker image
-# ✅ Build and push consumer Docker image
-# ✅ Deploy backend to Cloud Run
-# ✅ Deploy consumer to Cloud Run
-# ✅ Configure Firestore and Pub/Sub
-# ✅ Set up Cloud Build triggers for continuous deployment
 ```
 
-**That's it!** Your entire infrastructure is now deployed and running.
+**What this does:**
+- Sets up authentication for Terraform to access your GCP project
+- Enables local tools to interact with your GCP resources
 
-### GitHub Continuous Deployment Setup (One-Time)
-
-After the initial `terraform apply`, you need to authorize Cloud Build to access your GitHub repository (one-time setup):
-
-1. Visit the [GCP Console > Cloud Build > Triggers](https://console.cloud.google.com/cloud-build/triggers)
-2. You'll see two new triggers: `build-backend` and `build-consumer`
-3. Click **Connect Repository** if prompted
-4. Follow the GitHub OAuth flow to authorize Cloud Build
-5. Select the **ClickerGCP** repository
-
-After this one-time setup, every push to the `main` branch will automatically:
-- Trigger Cloud Build
-- Build new Docker images
-- Push images to Artifact Registry
-- Update Cloud Run services with the latest image
-
-### Manual Deploy (Alternative)
-
-If you prefer manual control, you can still deploy services manually:
+#### Step 2: Configure Terraform Variables
 
 ```bash
-# Build and push backend image
-docker build -t europe-southwest1-docker.pkg.dev/$GCP_PROJECT_ID/clicker-repo/backend:latest backend/
-docker push europe-southwest1-docker.pkg.dev/$GCP_PROJECT_ID/clicker-repo/backend:latest
+cd terraform
 
-# Build and push consumer image
-docker build -t europe-southwest1-docker.pkg.dev/$GCP_PROJECT_ID/clicker-repo/consumer:latest consumer/
-docker push europe-southwest1-docker.pkg.dev/$GCP_PROJECT_ID/clicker-repo/consumer:latest
+# Copy the example variables file
+cp terraform.tfvars.example terraform.tfvars
+
+# Edit terraform.tfvars with your project ID
+# You need to update:
+# - gcp_project_id = "your-gcp-project-id"
+# - github_owner = "your-github-username"
+# - github_repo = "ClickerGCP"
+
+# Or use sed to auto-update (Linux/Mac)
+sed -i 's/your-project-id/'$GCP_PROJECT_ID'/g' terraform.tfvars
+```
+
+**What to configure:**
+```hcl
+# terraform.tfvars
+gcp_project_id = "your-gcp-project-id"           # Required: Your GCP project ID
+github_owner   = "your-github-username"          # Required: Your GitHub username
+github_repo    = "ClickerGCP"                    # Required: Repository name
+gcp_region     = "europe-southwest1"             # Optional: GCP region (default is fine)
+```
+
+#### Step 3: Initialize Terraform
+
+```bash
+# Download Terraform providers and modules
+terraform init
+```
+
+**What this does:**
+- Downloads the Google Cloud Terraform provider
+- Sets up the `.terraform` directory with necessary configurations
+- Initializes the Terraform backend (GCS bucket for remote state)
+
+#### Step 4: Review the Deployment Plan
+
+```bash
+# See what Terraform will create
+terraform plan
+```
+
+**Expected output:**
+- 30+ resources to be created (services, databases, IAM roles, etc.)
+- Docker image builds via Cloud Build
+- No errors or warnings
+
+#### Step 5: Deploy Everything
+
+```bash
+# Deploy all infrastructure (this will take 5-10 minutes)
+terraform apply
+```
+
+**Interactive prompt:**
+- Terraform will ask: `Do you want to perform these actions?`
+- Type `yes` and press Enter to confirm
+
+**What happens during deployment:**
+1. ✅ Enables required GCP APIs
+2. ✅ Creates Artifact Registry repository
+3. ✅ Builds Docker images via Cloud Build (~2-3 minutes each)
+4. ✅ Pushes images to Artifact Registry
+5. ✅ Deploys backend service to Cloud Run
+6. ✅ Deploys consumer service to Cloud Run
+7. ✅ Creates Firestore database
+8. ✅ Creates Pub/Sub topic and subscription
+9. ✅ Configures IAM roles and service accounts
+
+**Expected output:**
+```
+Apply complete! Resources: 30+ added, 0 changed, 0 destroyed.
+
+Outputs:
+backend_url = "https://clicker-backend-xxx.a.run.app"
+consumer_url = "https://clicker-consumer-xxx.a.run.app"
+artifact_registry_repository = "europe-southwest1-docker.pkg.dev/..."
+...
+```
+
+---
+
+### Step 6: Verify Deployment
+
+After Terraform completes, verify everything is working:
+
+```bash
+# Get your backend service URL
+BACKEND_URL=$(terraform output -raw backend_url)
+echo "Backend URL: $BACKEND_URL"
+
+# Test 1: Health check
+curl "$BACKEND_URL/health"
+# Expected response: {"status":"ok"}
+
+# Test 2: Get initial counts
+curl "$BACKEND_URL/count"
+# Expected response: {"global":0,"countries":{}}
+
+# Test 3: Send a test click
+curl "$BACKEND_URL/click?country=US&ip=192.168.1.1"
+# Expected response: {"success":true}
+
+# Test 4: Wait 2 seconds for Pub/Sub delivery
+sleep 2
+
+# Test 5: Check if counter incremented
+curl "$BACKEND_URL/count"
+# Expected response: {"global":1,"countries":{"US":1}}
+```
+
+If all tests pass, **your deployment is successful!** 🎉
+
+---
+
+### Step 7 (Optional): Set Up Continuous Deployment
+
+To automatically deploy when you push to GitHub, set up Cloud Build triggers:
+
+#### 7a. Connect GitHub Repository
+
+1. Visit [GCP Console > Cloud Build > Triggers](https://console.cloud.google.com/cloud-build/triggers)
+2. Click **Create Trigger**
+3. Select **GitHub (Cloud Build GitHub App)** as the source
+4. Click **Authorize Cloud Build** (this opens a GitHub OAuth flow)
+5. Authorize the Cloud Build GitHub App to access your repositories
+6. Select the **ClickerGCP** repository
+7. Click **Continue**
+
+#### 7b. Create Backend Trigger
+
+1. **Name:** `build-backend`
+2. **Description:** "Build and push backend Docker image"
+3. **Event:** Push to a branch
+4. **Branch regex:** `^main$`
+5. **Build configuration:** Dockerfile
+6. **Dockerfile directory:** `backend/`
+7. **Dockerfile name:** `Dockerfile`
+8. **Image name:** `europe-southwest1-docker.pkg.dev/$PROJECT_ID/clicker-repo/backend:$SHORT_SHA`
+9. Click **Create Trigger**
+
+#### 7c. Create Consumer Trigger
+
+Repeat step 7b but for the consumer:
+1. **Name:** `build-consumer`
+2. **Dockerfile directory:** `consumer/`
+3. **Image name:** `europe-southwest1-docker.pkg.dev/$PROJECT_ID/clicker-repo/consumer:$SHORT_SHA`
+
+**After setup:**
+- Every push to `main` branch triggers automatic builds
+- Docker images are built and pushed to Artifact Registry
+- Cloud Run services auto-update with new images
+
+---
+
+### Cleanup: Destroy Everything
+
+When you're done testing and want to delete all resources (stop incurring charges):
+
+```bash
+# List all resources that will be destroyed
+terraform plan -destroy
+
+# Destroy all infrastructure (requires confirmation)
+terraform destroy
+
+# Or auto-approve destruction (careful!)
+terraform destroy -auto-approve
+```
+
+**What this destroys:**
+- Cloud Run services
+- Firestore database
+- Pub/Sub topic and subscription
+- Artifact Registry repository and images
+- Service accounts and IAM roles
+- All other created resources
+
+**Note:** Some resources may take a few minutes to delete.
+
+---
+
+### Troubleshooting
+
+#### Error: "Database ID 'clicker-db' is not available"
+- **Cause:** Firestore is being created or was recently deleted
+- **Fix:** Wait 2-3 minutes and run `terraform apply` again
+
+#### Error: "Cloud Build: Request contains an invalid argument"
+- **Cause:** GitHub repository not connected (we removed triggers from Terraform)
+- **Fix:** Set up Cloud Build triggers manually (see Step 7 above)
+
+#### Error: "Permission denied" during build
+- **Cause:** Service account lacks required IAM roles
+- **Fix:** Terraform should have configured all roles automatically. Run `terraform apply` again or check IAM settings in GCP Console
+
+#### Services stuck in "Creating" state
+- **Cause:** Container image pull failure or service startup issues
+- **Fix:** Check Cloud Run service logs:
+  ```bash
+  gcloud run services logs read clicker-backend --limit=50
+  ```
+
+#### Can't authenticate with GCP
+- **Fix:** Re-run authentication:
+  ```bash
+  gcloud auth application-default login
+  gcloud auth login
+  ```
+
+---
+
+### Summary: What Developers Must Do
+
+| Step | Command | Time |
+|------|---------|------|
+| 1 | Clone repo & cd ClickerGCP | 1 min |
+| 2 | Configure GCP project | 5 min |
+| 3 | Update terraform/terraform.tfvars | 2 min |
+| 4 | `terraform init` | 2 min |
+| 5 | `terraform plan` | 2 min |
+| 6 | `terraform apply` | 5-10 min |
+| 7 | Test endpoints | 2 min |
+| 8 (Optional) | Set up Cloud Build triggers | 5 min |
+| **Total** | **Full deployment** | **~20-30 min** |
+
+**Core requirement:** Just 6 commands:
+```bash
+gcloud auth application-default login
+cd terraform
+terraform init
+terraform plan
+terraform apply
+terraform output
 ```
 
 ---
