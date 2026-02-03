@@ -7,51 +7,131 @@ When users click the frontend button, the backend receives the click successfull
 - ❌ Consumer does not receive messages
 - ❌ Counters do not increment in Firestore
 
-## Root Cause Analysis
+## Root Cause Analysis - UPDATED
 
-### The Issue: Backend Pub/Sub Publisher Initialization Fails
+### The Issue: Backend Pub/Sub Publisher Initialization Fails with "PermissionDenied"
 
-The backend service logs show:
+The backend service shows:
 ```
-PermissionDenied: User not authorized to perform this action.
+pubsubPublisher: false
+publisherError: "rpc error: code = PermissionDenied desc = User not authorized to perform this action."
 ```
 
 This occurs when the backend tries to check if the Pub/Sub topic exists during startup:
 ```go
 topic := client.Topic(topicName)
-exists, err := topic.Exists(ctx)  // ← Fails here
+exists, err := topic.Exists(ctx)  // ← Fails here with PermissionDenied
 ```
 
-### Why It Happens
+### Investigation Findings
 
-1. **Docker Image Out of Date**: The Docker images in Artifact Registry were built BEFORE IAM permissions were properly configured
-2. **Stale Credentials**: The running Cloud Run service is using a Docker image that might have cached or outdated credential information
-3. **Credential Loading Issue**: The application initializes Pub/Sub on startup, and if credentials aren't properly available at that moment, the initialization fails
-4. **IAM Propagation**: Even though all IAM roles are set correctly, the Cloud Run service instance needs to be restarted to pick up new credentials
-
-### What's Working ✅
-
+**What's Working ✅:**
 - Backend service is running and healthy
-- Backend receives HTTP requests (click endpoint works)
+- Backend receives HTTP requests (click endpoint works → returns success: true)
 - Consumer service is running and publicly accessible
-- Pub/Sub topic and subscription are properly configured
-- All IAM permissions are correctly assigned:
-  - Backend has `roles/pubsub.publisher`
-  - Consumer has `roles/pubsub.subscriber`
-  - Pub/Sub service account can invoke consumer
+- Pub/Sub topic EXISTS and is accessible
+- All IAM permissions ARE correctly assigned:
+  - `clicker-backend@dev-trail-475809-v2.iam.gserviceaccount.com` has:
+    - `roles/pubsub.admin` ✅
+    - `roles/pubsub.editor` ✅
+    - `roles/pubsub.publisher` ✅
+  - `clicker-consumer@dev-trail-475809-v2.iam.gserviceaccount.com` has:
+    - `roles/pubsub.subscriber` ✅
+    - `roles/pubsub.viewer` ✅
+  - Pub/Sub service account can invoke consumer ✅
+- Manual publishing works: `gcloud pubsub topics publish click-events` succeeds
+- Pub/Sub API is enabled and accessible
 
-### What's NOT Working ❌
+**What's NOT Working ❌:**
+- Backend Cloud Run service cannot use its service account credentials to access Pub/Sub
+- The PermissionDenied error persists even after:
+  - Rebuilding Docker images ✓
+  - Restarting Cloud Run service ✓
+  - Adding timeout contexts ✓
+  - Verifying all IAM roles ✓
 
-- Backend cannot initialize Pub/Sub publisher at startup
-- No messages are being published to Pub/Sub
-- Consumer never receives messages to process
-- Counters never increment
+### Root Cause: Credential Loading in Cloud Run Environment
+
+The issue is NOT:
+- ❌ IAM permissions (verified multiple times)
+- ❌ Topic existence (topic exists and is accessible)
+- ❌ Docker image staleness (rebuilt and tested)
+- ❌ Environment variables (all set correctly)
+- ❌ Pub/Sub API availability (API is enabled and working)
+
+The issue IS:
+- ✅ The Cloud Run service is NOT loading the service account credentials properly
+- ✅ The Pub/Sub client is being created but cannot authenticate with the backend service account
+- ✅ This is a credential negotiation failure between Cloud Run and Pub/Sub API
+
+**Possible causes:**
+1. Cloud Run service isn't passing service account credentials to the application
+2. The Go `cloud.google.com/go/pubsub` library isn't picking up credentials from Cloud Run environment
+3. There's a network/firewall issue between Cloud Run and Pub/Sub API (unlikely, but possible)
+4. The service account itself has an internal issue or is in an invalid state
 
 ---
 
-## Solution: Rebuild and Redeploy Docker Images
+## Solutions to Try (In Order)
 
-The fix is to rebuild the Docker images and redeploy them to Cloud Run. This ensures:
+### Solution 1: Delete and Recreate Service Account (Most Likely to Work)
+
+The service account itself might be in an invalid state. Deleting and recreating it forces fresh credential setup:
+
+```bash
+# 1. Delete the backend service account
+gcloud iam service-accounts delete clicker-backend@dev-trail-475809-v2.iam.gserviceaccount.com
+
+# 2. Redeploy to recreate it with Terraform
+cd terraform
+terraform apply -lock=false -auto-approve
+
+# 3. Rebuild Docker images with new service account
+gcloud builds submit --config=backend/cloudbuild.yaml backend/
+gcloud builds submit --config=consumer/cloudbuild.yaml consumer/
+
+# 4. Test
+sleep 120
+BACKEND_URL=$(gcloud run services describe clicker-backend --region=europe-southwest1 --format='value(status.url)')
+curl -s "$BACKEND_URL/debug/config" | jq '.pubsubPublisher'
+# Expected: true
+```
+
+### Solution 2: Full Infrastructure Rebuild from Zero
+
+Destroy everything and redeploy with fresh infrastructure:
+
+```bash
+# 1. Destroy all infrastructure
+terraform destroy -auto-approve
+
+# 2. Wait for Firestore cleanup (important!)
+sleep 300
+
+# 3. Rebuild from scratch
+terraform apply -auto-approve
+
+# 4. Test
+sleep 60
+BACKEND_URL=$(terraform output -raw backend_url)
+curl -s "$BACKEND_URL/debug/config" | jq '.pubsubPublisher'
+# Expected: true
+```
+
+### Solution 3: Modify Backend Code to Skip Pub/Sub Initialization Failure
+
+If you want the backend to work even if Pub/Sub fails to initialize, modify the code to allow graceful degradation. This keeps the system operational but won't send messages to Pub/Sub.
+
+The current code already does this - it logs the error and continues without Pub/Sub. If you need functionality to work, you could:
+- Remove the topic existence check (just assume it exists)
+- Add retry logic with exponential backoff
+- Use lazy initialization (initialize on first publish attempt, not at startup)
+
+---
+
+## Original Solution: Rebuild and Redeploy Docker Images
+
+**Note:** This solution was already attempted and did NOT resolve the issue. It ensures:
 1. Fresh credential loading when the service starts
 2. Latest code and environment configuration
 3. Service account credentials are properly refreshed
