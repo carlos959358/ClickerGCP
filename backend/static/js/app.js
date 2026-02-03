@@ -71,11 +71,11 @@ function setupEventListeners() {
 }
 
 // Handle click event
-async function handleClick() {
+function handleClick() {
     if (state.isClicking) return;
 
-    if (!state.authToken) {
-        updateStatus('Not authenticated. Waiting for token...', 'error', 3000);
+    if (!state.isWSConnected) {
+        updateStatus('Waiting for connection...', 'error', 3000);
         return;
     }
 
@@ -83,16 +83,10 @@ async function handleClick() {
     elements.clickBtn.disabled = true;
 
     try {
-        const response = await fetch(`${CONFIG.BACKEND_URL}/click?token=${encodeURIComponent(state.authToken)}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-        });
-
-        if (!response.ok) {
-            throw new Error(`Click failed: ${response.status}`);
-        }
+        // Send click message via WebSocket
+        window.ws.send(JSON.stringify({
+            type: 'click'
+        }));
 
         updateStatus('Click sent! 👍', 'success', 2000);
 
@@ -110,30 +104,30 @@ async function handleClick() {
     }
 }
 
-// Load initial counts
-async function loadInitialCounts() {
+// Load initial counts via WebSocket
+function loadInitialCounts() {
+    if (!state.isWSConnected) {
+        console.log('Waiting for WebSocket connection before loading counts...');
+        setTimeout(loadInitialCounts, 500);
+        return;
+    }
+
+    if (!window.ws) {
+        console.log('WebSocket not ready yet...');
+        setTimeout(loadInitialCounts, 500);
+        return;
+    }
+
     try {
-        if (!state.authToken) {
-            console.log('Waiting for auth token before loading counts...');
-            setTimeout(loadInitialCounts, 500);
-            return;
-        }
-
-        const response = await fetch(`${CONFIG.BACKEND_URL}/count?token=${encodeURIComponent(state.authToken)}`);
-        if (!response.ok) throw new Error('Failed to load counts');
-
-        const data = await response.json();
-        state.globalCount = data.global || 0;
-        state.countries = data.countries || {};
-
-        updateCounterDisplay();
-        updateLeaderboard();
+        // Request count via WebSocket
+        window.ws.send(JSON.stringify({
+            type: 'get_count'
+        }));
         state.isConnected = true;
         updateConnectionStatus();
     } catch (error) {
-        console.error('Failed to load initial counts:', error);
+        console.error('Failed to request counts:', error);
         updateStatus('Failed to load data. Retrying...', 'error', 0);
-        // Retry after 3 seconds
         setTimeout(loadInitialCounts, 3000);
     }
 }
@@ -144,6 +138,7 @@ function connectWebSocket() {
 
     try {
         const ws = new WebSocket(wsURL);
+        window.ws = ws; // Store WebSocket globally for message sending
 
         ws.onopen = () => {
             console.log('WebSocket connected');
@@ -165,12 +160,47 @@ function connectWebSocket() {
                     return;
                 }
 
+                // Handle count response
+                if (data.type === 'count_response') {
+                    state.globalCount = data.global || state.globalCount;
+                    state.countries = data.countries || state.countries;
+                    updateCounterDisplay();
+                    updateLeaderboard();
+                    return;
+                }
+
+                // Handle countries response
+                if (data.type === 'countries_response') {
+                    state.countries = data.countries || state.countries;
+                    updateLeaderboard();
+                    return;
+                }
+
+                // Handle broadcast counter updates
                 if (data.type === 'counter_update') {
                     state.globalCount = data.global || state.globalCount;
                     state.countries = data.countries || state.countries;
                     updateCounterDisplay();
                     updateLeaderboard();
+                    return;
                 }
+
+                // Handle click success
+                if (data.type === 'click_success') {
+                    console.log('Click processed successfully');
+                    return;
+                }
+
+                // Handle click error
+                if (data.type === 'click_error') {
+                    const error = data.error || 'Click failed';
+                    console.warn('Click error:', error);
+                    if (error === 'rate limit exceeded') {
+                        updateStatus('Too many clicks! Slow down.', 'error', 3000);
+                    }
+                    return;
+                }
+
             } catch (error) {
                 console.error('Failed to parse WebSocket message:', error);
             }
@@ -186,6 +216,7 @@ function connectWebSocket() {
             console.log('WebSocket disconnected');
             state.isWSConnected = false;
             state.authToken = null; // Clear token on disconnect
+            state.isConnected = false;
             updateConnectionStatus();
             // Attempt to reconnect after 3 seconds
             setTimeout(connectWebSocket, 3000);
@@ -292,9 +323,11 @@ function getCountryEmoji(countryCode) {
     }
 }
 
-// Periodic sync (backup mechanism)
+// Periodic sync - refresh counts every 30 seconds if connected
 setInterval(() => {
-    if (!state.isWSConnected && state.authToken) {
-        loadInitialCounts();
+    if (state.isWSConnected && window.ws) {
+        window.ws.send(JSON.stringify({
+            type: 'get_count'
+        }));
     }
-}, 10000); // Every 10 seconds
+}, 30000); // Every 30 seconds

@@ -19,11 +19,28 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// ClientMessage represents a message from client to server
+type ClientMessage struct {
+	Type string                 `json:"type"`
+	Data map[string]interface{} `json:"data,omitempty"`
+}
+
+// ServerMessage represents a message from server to client
+type ServerMessage struct {
+	Type string                 `json:"type"`
+	Data map[string]interface{} `json:"data,omitempty"`
+}
+
 // Client represents a connected WebSocket client
 type Client struct {
-	conn  *websocket.Conn
-	send  chan interface{}
-	token string // Authentication token for this client
+	conn          *websocket.Conn
+	send          chan interface{}
+	token         string // Authentication token for this client
+	clientIP      string // Client IP address
+	country       string // Country code from geolocation
+	lastClickTime time.Time
+	clickCount    int
+	mu            sync.Mutex
 }
 
 // Hub maintains the set of active clients and broadcasts messages to them
@@ -109,6 +126,26 @@ func GenerateToken() string {
 	return hex.EncodeToString(b)
 }
 
+// checkRateLimit checks if a client has exceeded the rate limit (10 clicks per second)
+func (c *Client) checkRateLimit() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	now := time.Now()
+	if now.Sub(c.lastClickTime) >= time.Second {
+		// Reset counter every second
+		c.clickCount = 0
+		c.lastClickTime = now
+	}
+
+	if c.clickCount >= 10 {
+		return false // Rate limit exceeded
+	}
+
+	c.clickCount++
+	return true
+}
+
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		// Allow all origins for WebSocket connections (same-origin only in practice)
@@ -187,6 +224,127 @@ func tryIPAPI(ip string) string {
 		return countryCode
 	}
 	return "Unknown"
+}
+
+// WebSocket message handlers
+
+// handleClick processes a click message from the client
+func handleClick(client *Client, hub *Hub, ctx context.Context) {
+	// Check rate limit
+	if !client.checkRateLimit() {
+		serverMsg := ServerMessage{
+			Type: "click_error",
+			Data: map[string]interface{}{
+				"error": "rate limit exceeded",
+			},
+		}
+		select {
+		case client.send <- serverMsg:
+		default:
+			// Send channel full, skip
+		}
+		return
+	}
+
+	// Publish to Pub/Sub if available
+	if publisher != nil {
+		err := publisher.PublishClickEvent(ctx, client.country, client.clientIP)
+		if err != nil {
+			log.Printf("Failed to publish click event: %v", err)
+		}
+	}
+
+	// Send success response
+	serverMsg := ServerMessage{
+		Type: "click_success",
+		Data: map[string]interface{}{
+			"status": "ok",
+		},
+	}
+	select {
+	case client.send <- serverMsg:
+	default:
+		// Send channel full, skip
+	}
+}
+
+// handleGetCount sends the current count data to the client
+func handleGetCount(client *Client, ctx context.Context) {
+	var counterData *CounterData
+
+	// Try to get data from Firestore if available
+	if firestoreClient != nil {
+		data, err := firestoreClient.GetCounters(ctx)
+		if err != nil {
+			log.Printf("ERROR reading from Firestore: %v", err)
+			serverMsg := ServerMessage{
+				Type: "count_error",
+				Data: map[string]interface{}{
+					"error": fmt.Sprintf("firestore error: %v", err),
+				},
+			}
+			select {
+			case client.send <- serverMsg:
+			default:
+			}
+			return
+		}
+		counterData = data
+	} else {
+		// Fallback if Firestore not initialized
+		counterData = &CounterData{
+			Global: 0,
+			Countries: map[string]interface{}{
+				"country_US": map[string]interface{}{"count": int64(0), "country": "US"},
+				"country_UK": map[string]interface{}{"count": int64(0), "country": "UK"},
+				"country_DE": map[string]interface{}{"count": int64(0), "country": "DE"},
+			},
+		}
+	}
+
+	// Send count response
+	serverMsg := ServerMessage{
+		Type: "count_response",
+		Data: map[string]interface{}{
+			"global":    counterData.Global,
+			"countries": counterData.Countries,
+		},
+	}
+	select {
+	case client.send <- serverMsg:
+	default:
+	}
+}
+
+// handleGetCountries sends the countries list to the client
+func handleGetCountries(client *Client, ctx context.Context) {
+	// Use default countries
+	countries := map[string]interface{}{
+		"country_US": map[string]interface{}{"count": int64(0), "country": "US"},
+		"country_UK": map[string]interface{}{"count": int64(0), "country": "UK"},
+		"country_DE": map[string]interface{}{"count": int64(0), "country": "DE"},
+		"country_FR": map[string]interface{}{"count": int64(0), "country": "FR"},
+		"country_JP": map[string]interface{}{"count": int64(0), "country": "JP"},
+	}
+
+	// Try to get real data from Firestore if available
+	if firestoreClient != nil {
+		if data, err := firestoreClient.GetCounters(ctx); err == nil {
+			countries = data.Countries
+		}
+	}
+
+	// Send countries response
+	serverMsg := ServerMessage{
+		Type: "countries_response",
+		Data: map[string]interface{}{
+			"countries": countries,
+		},
+	}
+	select {
+	case client.send <- serverMsg:
+	default:
+	}
 }
 
 // Global variables for debugging
@@ -315,118 +473,6 @@ func main() {
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	mux.HandleFunc("/count", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
-		// Validate authentication token
-		token := r.URL.Query().Get("token")
-		if !hub.ValidateToken(token) {
-			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte(`{"error":"unauthorized: invalid or missing token"}`))
-			return
-		}
-
-		var counterData *CounterData
-
-		// Try to get data from Firestore if available
-		if firestoreClient != nil {
-			log.Printf("Attempting to read from Firestore...")
-			data, err := firestoreClient.GetCounters(bgCtx)
-			if err != nil {
-				log.Printf("ERROR reading from Firestore: %v", err)
-				w.WriteHeader(http.StatusInternalServerError)
-				errMsg := fmt.Sprintf(`{"error":"firestore error: %v"}`, err)
-				w.Write([]byte(errMsg))
-				return
-			}
-			counterData = data
-			log.Printf("Successfully read from Firestore: global=%d, countries=%d", data.Global, len(data.Countries))
-		} else {
-			// Fallback if Firestore not initialized
-			log.Printf("Firestore client not available, using defaults")
-			counterData = &CounterData{
-				Global: 0,
-				Countries: map[string]interface{}{
-					"country_US": map[string]interface{}{"count": int64(0), "country": "US"},
-					"country_UK": map[string]interface{}{"count": int64(0), "country": "UK"},
-					"country_DE": map[string]interface{}{"count": int64(0), "country": "DE"},
-				},
-			}
-		}
-
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(counterData)
-	})
-
-	mux.HandleFunc("/countries", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
-		// Validate authentication token
-		token := r.URL.Query().Get("token")
-		if !hub.ValidateToken(token) {
-			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte(`{"error":"unauthorized: invalid or missing token"}`))
-			return
-		}
-
-		// Use default countries
-		countries := map[string]interface{}{
-			"country_US": map[string]interface{}{"count": int64(0), "country": "US"},
-			"country_UK": map[string]interface{}{"count": int64(0), "country": "UK"},
-			"country_DE": map[string]interface{}{"count": int64(0), "country": "DE"},
-			"country_FR": map[string]interface{}{"count": int64(0), "country": "FR"},
-			"country_JP": map[string]interface{}{"count": int64(0), "country": "JP"},
-		}
-
-		// Try to get real data from Firestore if available
-		if firestoreClient != nil {
-			if data, err := firestoreClient.GetCounters(bgCtx); err == nil {
-				countries = data.Countries
-			}
-		}
-
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(countries)
-	})
-
-	mux.HandleFunc("/click", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
-		// Validate authentication token
-		token := r.URL.Query().Get("token")
-		if !hub.ValidateToken(token) {
-			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte(`{"error":"unauthorized: invalid or missing token"}`))
-			return
-		}
-
-		// Get client IP
-		clientIP := r.RemoteAddr
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			// X-Forwarded-For can contain multiple IPs; take the first one
-			clientIP = strings.Split(xff, ",")[0]
-			clientIP = strings.TrimSpace(clientIP)
-		} else {
-			// RemoteAddr includes port; extract just the IP
-			if idx := strings.LastIndex(clientIP, ":"); idx != -1 {
-				clientIP = clientIP[:idx]
-			}
-		}
-
-		// Get country from IP using geolocation API
-		country := getCountryFromIP(clientIP)
-
-		// Publish to Pub/Sub if available
-		if publisher != nil {
-			err := publisher.PublishClickEvent(bgCtx, country, clientIP)
-			if err != nil {
-				log.Printf("Failed to publish click event: %v", err)
-			}
-		}
-
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"success":true}`))
-	})
 
 	// WebSocket handler
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
@@ -439,10 +485,27 @@ func main() {
 		// Generate authentication token for this client
 		token := GenerateToken()
 
+		// Extract client IP
+		clientIP := r.RemoteAddr
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			clientIP = strings.Split(xff, ",")[0]
+			clientIP = strings.TrimSpace(clientIP)
+		} else {
+			if idx := strings.LastIndex(clientIP, ":"); idx != -1 {
+				clientIP = clientIP[:idx]
+			}
+		}
+
+		// Determine country from IP
+		country := getCountryFromIP(clientIP)
+
 		client := &Client{
-			conn:  conn,
-			send:  make(chan interface{}, 256),
-			token: token,
+			conn:          conn,
+			send:          make(chan interface{}, 256),
+			token:         token,
+			clientIP:      clientIP,
+			country:       country,
+			lastClickTime: time.Now(),
 		}
 		hub.register <- client
 
@@ -455,7 +518,7 @@ func main() {
 			conn.Close()
 			return
 		}
-		log.Printf("Sent auth token to client: %s", token[:8]+"...")
+		log.Printf("Sent auth token to client: %s from %s (%s)", token[:8]+"...", clientIP, country)
 
 		go func() {
 			defer func() {
@@ -463,17 +526,30 @@ func main() {
 				conn.Close()
 			}()
 
-			// Read messages from client (for ping/heartbeat or other messages)
+			// Read messages from client
 			for {
-				var msg interface{}
-				if err := conn.ReadJSON(&msg); err != nil {
+				var clientMsg ClientMessage
+				if err := conn.ReadJSON(&clientMsg); err != nil {
 					if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 						log.Printf("WebSocket error: %v", err)
 					}
 					return
 				}
-				// Process any incoming messages if needed
-				log.Printf("Received message: %v", msg)
+
+				// Handle different message types
+				switch clientMsg.Type {
+				case "click":
+					handleClick(client, hub, bgCtx)
+
+				case "get_count":
+					handleGetCount(client, bgCtx)
+
+				case "get_countries":
+					handleGetCountries(client, bgCtx)
+
+				default:
+					log.Printf("Unknown message type: %s", clientMsg.Type)
+				}
 			}
 		}()
 
