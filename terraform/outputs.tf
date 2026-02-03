@@ -30,7 +30,7 @@ output "consumer_service_account" {
 
 output "artifact_registry_repository" {
   description = "Artifact Registry repository"
-  value       = "${var.gcp_region}-docker.pkg.dev/${var.gcp_project_id}/${data.google_artifact_registry_repository.clicker.repository_id}"
+  value       = "${var.gcp_region}-docker.pkg.dev/${var.gcp_project_id}/${google_artifact_registry_repository.clicker.repository_id}"
 }
 
 output "backend_docker_image" {

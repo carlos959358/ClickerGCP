@@ -1,6 +1,6 @@
 resource "google_cloud_run_service" "backend" {
-  project = var.gcp_project_id
-  name    = var.backend_service_name
+  project  = var.gcp_project_id
+  name     = var.backend_service_name
   location = var.gcp_region
 
   template {
@@ -38,10 +38,10 @@ resource "google_cloud_run_service" "backend" {
 
     metadata {
       annotations = {
-        "autoscaling.knative.dev/maxScale"      = tostring(var.backend_max_instances)
-        "autoscaling.knative.dev/minScale"      = tostring(var.backend_min_instances)
-        "run.googleapis.com/cpu-throttling"     = "true"
-        "run.googleapis.com/startup-cpu-boost"  = "false"
+        "autoscaling.knative.dev/maxScale"     = tostring(var.backend_max_instances)
+        "autoscaling.knative.dev/minScale"     = tostring(var.backend_min_instances)
+        "run.googleapis.com/cpu-throttling"    = "true"
+        "run.googleapis.com/startup-cpu-boost" = "false"
       }
     }
   }
@@ -61,8 +61,8 @@ resource "google_cloud_run_service" "backend" {
 }
 
 resource "google_cloud_run_service" "consumer" {
-  project = var.gcp_project_id
-  name    = var.consumer_service_name
+  project  = var.gcp_project_id
+  name     = var.consumer_service_name
   location = var.gcp_region
 
   template {
@@ -105,10 +105,10 @@ resource "google_cloud_run_service" "consumer" {
 
     metadata {
       annotations = {
-        "autoscaling.knative.dev/maxScale"      = tostring(var.consumer_max_instances)
-        "autoscaling.knative.dev/minScale"      = tostring(var.consumer_min_instances)
-        "run.googleapis.com/cpu-throttling"     = "true"
-        "run.googleapis.com/startup-cpu-boost"  = "false"
+        "autoscaling.knative.dev/maxScale"     = tostring(var.consumer_max_instances)
+        "autoscaling.knative.dev/minScale"     = tostring(var.consumer_min_instances)
+        "run.googleapis.com/cpu-throttling"    = "true"
+        "run.googleapis.com/startup-cpu-boost" = "false"
       }
     }
   }

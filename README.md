@@ -142,56 +142,60 @@ ClickerGCP/
 - GCP Project with billing enabled
 - `gcloud` CLI installed and authenticated
 - `terraform` installed
-- Docker installed (for local image building)
 
-### Quick Deploy
+### Quick Deploy (Fully Automated)
 
 ```bash
-# 1. Set environment variables
-export GCP_PROJECT_ID="your-project-id"
-export GCP_REGION="europe-southwest1"
+# 1. Authenticate with GCP
+gcloud auth application-default login
+gcloud config set project YOUR_PROJECT_ID
 
-# 2. Deploy infrastructure with Terraform
+# 2. Deploy everything
 cd terraform
 terraform init
-terraform plan
 terraform apply
 
-# 3. Deploy services via Cloud Build (automated)
-# Cloud Build will:
-# - Build backend Docker image
-# - Push to Artifact Registry
-# - Deploy to Cloud Run
-# - Build consumer Docker image
-# - Push to Artifact Registry
-# - Deploy to Cloud Run
-
-cd ..
-gcloud builds submit --config=backend/cloudbuild.yaml
-gcloud builds submit --config=consumer/cloudbuild.yaml
+# 3. Wait for build completion (~5-10 minutes)
+# Terraform will:
+# ✅ Create Artifact Registry repository
+# ✅ Build and push backend Docker image
+# ✅ Build and push consumer Docker image
+# ✅ Deploy backend to Cloud Run
+# ✅ Deploy consumer to Cloud Run
+# ✅ Configure Firestore and Pub/Sub
+# ✅ Set up Cloud Build triggers for continuous deployment
 ```
 
-### Manual Deploy
+**That's it!** Your entire infrastructure is now deployed and running.
+
+### GitHub Continuous Deployment Setup (One-Time)
+
+After the initial `terraform apply`, you need to authorize Cloud Build to access your GitHub repository (one-time setup):
+
+1. Visit the [GCP Console > Cloud Build > Triggers](https://console.cloud.google.com/cloud-build/triggers)
+2. You'll see two new triggers: `build-backend` and `build-consumer`
+3. Click **Connect Repository** if prompted
+4. Follow the GitHub OAuth flow to authorize Cloud Build
+5. Select the **ClickerGCP** repository
+
+After this one-time setup, every push to the `main` branch will automatically:
+- Trigger Cloud Build
+- Build new Docker images
+- Push images to Artifact Registry
+- Update Cloud Run services with the latest image
+
+### Manual Deploy (Alternative)
+
+If you prefer manual control, you can still deploy services manually:
 
 ```bash
 # Build and push backend image
 docker build -t europe-southwest1-docker.pkg.dev/$GCP_PROJECT_ID/clicker-repo/backend:latest backend/
 docker push europe-southwest1-docker.pkg.dev/$GCP_PROJECT_ID/clicker-repo/backend:latest
 
-# Deploy backend to Cloud Run
-gcloud run deploy clicker-backend \
-  --image=europe-southwest1-docker.pkg.dev/$GCP_PROJECT_ID/clicker-repo/backend:latest \
-  --region=europe-southwest1 \
-  --project=$GCP_PROJECT_ID
-
-# Repeat for consumer service
+# Build and push consumer image
 docker build -t europe-southwest1-docker.pkg.dev/$GCP_PROJECT_ID/clicker-repo/consumer:latest consumer/
 docker push europe-southwest1-docker.pkg.dev/$GCP_PROJECT_ID/clicker-repo/consumer:latest
-
-gcloud run deploy clicker-consumer \
-  --image=europe-southwest1-docker.pkg.dev/$GCP_PROJECT_ID/clicker-repo/consumer:latest \
-  --region=europe-southwest1 \
-  --project=$GCP_PROJECT_ID
 ```
 
 ---
