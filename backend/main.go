@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,13 +21,15 @@ import (
 
 // Client represents a connected WebSocket client
 type Client struct {
-	conn *websocket.Conn
-	send chan interface{}
+	conn  *websocket.Conn
+	send  chan interface{}
+	token string // Authentication token for this client
 }
 
 // Hub maintains the set of active clients and broadcasts messages to them
 type Hub struct {
 	clients    map[*Client]bool
+	tokens     map[string]*Client // Map of auth tokens to clients
 	broadcast  chan interface{}
 	register   chan *Client
 	unregister chan *Client
@@ -36,6 +40,7 @@ type Hub struct {
 func NewHub() *Hub {
 	return &Hub{
 		clients:    make(map[*Client]bool),
+		tokens:     make(map[string]*Client),
 		broadcast:  make(chan interface{}, 256),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
@@ -49,6 +54,9 @@ func (h *Hub) Run() {
 		case client := <-h.register:
 			h.mu.Lock()
 			h.clients[client] = true
+			if client.token != "" {
+				h.tokens[client.token] = client
+			}
 			h.mu.Unlock()
 			log.Printf("Client registered. Total clients: %d", len(h.clients))
 
@@ -57,6 +65,9 @@ func (h *Hub) Run() {
 			if ok := h.clients[client]; ok {
 				delete(h.clients, client)
 				close(client.send)
+				if client.token != "" {
+					delete(h.tokens, client.token)
+				}
 			}
 			h.mu.Unlock()
 			log.Printf("Client unregistered. Total clients: %d", len(h.clients))
@@ -78,6 +89,24 @@ func (h *Hub) Run() {
 // Broadcast sends a message to all connected clients
 func (h *Hub) Broadcast(message interface{}) {
 	h.broadcast <- message
+}
+
+// ValidateToken checks if a token is valid and belongs to an active client
+func (h *Hub) ValidateToken(token string) bool {
+	if token == "" {
+		return false
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	_, exists := h.tokens[token]
+	return exists
+}
+
+// GenerateToken creates a new random authentication token
+func GenerateToken() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 var upgrader = websocket.Upgrader{
@@ -289,6 +318,14 @@ func main() {
 	mux.HandleFunc("/count", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
+		// Validate authentication token
+		token := r.URL.Query().Get("token")
+		if !hub.ValidateToken(token) {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"error":"unauthorized: invalid or missing token"}`))
+			return
+		}
+
 		var counterData *CounterData
 
 		// Try to get data from Firestore if available
@@ -324,6 +361,14 @@ func main() {
 	mux.HandleFunc("/countries", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
+		// Validate authentication token
+		token := r.URL.Query().Get("token")
+		if !hub.ValidateToken(token) {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"error":"unauthorized: invalid or missing token"}`))
+			return
+		}
+
 		// Use default countries
 		countries := map[string]interface{}{
 			"country_US": map[string]interface{}{"count": int64(0), "country": "US"},
@@ -346,6 +391,14 @@ func main() {
 
 	mux.HandleFunc("/click", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+
+		// Validate authentication token
+		token := r.URL.Query().Get("token")
+		if !hub.ValidateToken(token) {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"error":"unauthorized: invalid or missing token"}`))
+			return
+		}
 
 		// Get client IP
 		clientIP := r.RemoteAddr
@@ -383,11 +436,26 @@ func main() {
 			return
 		}
 
+		// Generate authentication token for this client
+		token := GenerateToken()
+
 		client := &Client{
-			conn: conn,
-			send: make(chan interface{}, 256),
+			conn:  conn,
+			send:  make(chan interface{}, 256),
+			token: token,
 		}
 		hub.register <- client
+
+		// Send the token to the client immediately
+		if err := conn.WriteJSON(map[string]interface{}{
+			"type":  "auth_token",
+			"token": token,
+		}); err != nil {
+			log.Printf("Failed to send auth token: %v", err)
+			conn.Close()
+			return
+		}
+		log.Printf("Sent auth token to client: %s", token[:8]+"...")
 
 		go func() {
 			defer func() {

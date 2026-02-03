@@ -44,6 +44,7 @@ const state = {
     globalCount: 0,
     countries: {},
     isClicking: false,
+    authToken: null, // Authentication token from WebSocket
 };
 
 // DOM elements
@@ -61,7 +62,7 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log('Initializing Clicker app...');
     setupEventListeners();
     connectWebSocket();
-    loadInitialCounts();
+    // loadInitialCounts will be called after receiving auth token from WebSocket
 });
 
 // Setup event listeners
@@ -73,11 +74,16 @@ function setupEventListeners() {
 async function handleClick() {
     if (state.isClicking) return;
 
+    if (!state.authToken) {
+        updateStatus('Not authenticated. Waiting for token...', 'error', 3000);
+        return;
+    }
+
     state.isClicking = true;
     elements.clickBtn.disabled = true;
 
     try {
-        const response = await fetch(`${CONFIG.BACKEND_URL}/click`, {
+        const response = await fetch(`${CONFIG.BACKEND_URL}/click?token=${encodeURIComponent(state.authToken)}`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -107,7 +113,13 @@ async function handleClick() {
 // Load initial counts
 async function loadInitialCounts() {
     try {
-        const response = await fetch(`${CONFIG.BACKEND_URL}/count`);
+        if (!state.authToken) {
+            console.log('Waiting for auth token before loading counts...');
+            setTimeout(loadInitialCounts, 500);
+            return;
+        }
+
+        const response = await fetch(`${CONFIG.BACKEND_URL}/count?token=${encodeURIComponent(state.authToken)}`);
         if (!response.ok) throw new Error('Failed to load counts');
 
         const data = await response.json();
@@ -144,6 +156,15 @@ function connectWebSocket() {
             try {
                 const data = JSON.parse(event.data);
 
+                // Handle auth token from server
+                if (data.type === 'auth_token') {
+                    state.authToken = data.token;
+                    console.log('Received auth token:', data.token.substring(0, 8) + '...');
+                    // Load counts once we have the token
+                    loadInitialCounts();
+                    return;
+                }
+
                 if (data.type === 'counter_update') {
                     state.globalCount = data.global || state.globalCount;
                     state.countries = data.countries || state.countries;
@@ -164,6 +185,7 @@ function connectWebSocket() {
         ws.onclose = () => {
             console.log('WebSocket disconnected');
             state.isWSConnected = false;
+            state.authToken = null; // Clear token on disconnect
             updateConnectionStatus();
             // Attempt to reconnect after 3 seconds
             setTimeout(connectWebSocket, 3000);
@@ -272,7 +294,7 @@ function getCountryEmoji(countryCode) {
 
 // Periodic sync (backup mechanism)
 setInterval(() => {
-    if (!state.isWSConnected) {
+    if (!state.isWSConnected && state.authToken) {
         loadInitialCounts();
     }
 }, 10000); // Every 10 seconds
