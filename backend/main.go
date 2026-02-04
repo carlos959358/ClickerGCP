@@ -520,6 +520,26 @@ func main() {
 		}
 		log.Printf("Sent auth token to client: %s from %s (%s)", token[:8]+"...", clientIP, country)
 
+		// Send initial counter data immediately after auth token
+		if firestoreClient != nil {
+			if counterData, err := firestoreClient.GetCounters(bgCtx); err == nil {
+				initialMsg := ServerMessage{
+					Type: "count_response",
+					Data: map[string]interface{}{
+						"global":    counterData.Global,
+						"countries": counterData.Countries,
+					},
+				}
+				if err := conn.WriteJSON(initialMsg); err != nil {
+					log.Printf("Failed to send initial counter data: %v", err)
+				} else {
+					log.Printf("Sent initial counter data to client: global=%d, countries=%d", counterData.Global, len(counterData.Countries))
+				}
+			} else {
+				log.Printf("Failed to get initial counter data: %v", err)
+			}
+		}
+
 		go func() {
 			defer func() {
 				hub.unregister <- client
