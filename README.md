@@ -102,6 +102,12 @@ curl "$BACKEND/count" | jq .
 
 ## System Architecture
 
+### Visual Architecture Diagram
+
+![ClickerGCP Serverless Architecture](infrastructure.png)
+
+### ASCII Architecture
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Frontend (Browser)                            │
