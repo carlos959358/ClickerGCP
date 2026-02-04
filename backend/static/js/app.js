@@ -216,9 +216,14 @@ function connectWebSocket() {
                 if (data.type === 'auth_token') {
                     state.authToken = data.token;
                     console.log('Received auth token:', data.token.substring(0, 8) + '...');
-                    // Initial counter data will be sent automatically by the server
                     state.isConnected = true;
                     updateConnectionStatus();
+
+                    // Request initial counter data from server
+                    console.log('Requesting initial counter data...');
+                    window.ws.send(JSON.stringify({
+                        type: 'get_count'
+                    }));
                     return;
                 }
 
